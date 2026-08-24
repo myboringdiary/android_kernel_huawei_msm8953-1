@@ -1,0 +1,47 @@
+name: 编译内核+打包模块
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+    steps:
+      - name: 安装编译依赖
+        run: |
+          sudo apt update
+          sudo apt install -y git ccache automake flex lzop bison gperf build-essential zip curl zlib1g-dev bc kmod cpio libssl-dev device-tree-compiler
+      - name: 拉取编译工具链
+        run: |
+          git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b android-8.1.0_r52 --depth=1 gcc
+      - name: 编译内核
+        run: |
+          export ARCH=arm64
+          export CROSS_COMPILE=$(pwd)/gcc/bin/aarch64-linux-android-
+          make hwcan_defconfig
+          make -j$(nproc)
+      - name: 收集模块文件
+        run: |
+          mkdir -p modules_output
+          find . -name "*.ko" -exec cp {} modules_output/ \;
+          echo "共找到 $(ls modules_output/*.ko 2>/dev/null | wc -l) 个模块文件"
+      - name: 打包AnyKernel3刷机包
+        run: |
+          git clone https://github.com/osm0sis/AnyKernel3 --depth=1 anykernel
+          cp arch/arm64/boot/Image.gz anykernel/
+          cp arch/arm64/boot/dts/qcom/*.dtb anykernel/ 2>/dev/null || cp arch/arm64/boot/dts/*.dtb anykernel/ 2>/dev/null || true
+          mkdir -p anykernel/modules
+          cp modules_output/*.ko anykernel/modules/ 2>/dev/null || true
+          cd anykernel
+          echo "do.modules=1" >> anykernel.sh
+          echo "module_path=/system/lib/modules" >> anykernel.sh
+          zip -r9 ../kernel-hwcan-nethunter.zip *
+          cd ..
+      - name: 上传完整刷机包
+        uses: actions/upload-artifact@v4
+        with:
+          name: 完整刷机包-含内核和模块
+          path: kernel-hwcan-nethunter.zip
+      - name: 上传模块文件（单独备份）
+        uses: actions/upload-artifact@v4
+        with:
+          name: 单独的模块文件
+          path: modules_output/
