@@ -9,37 +9,68 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y git ccache automake flex lzop bison gperf build-essential zip curl zlib1g-dev bc kmod cpio libssl-dev device-tree-compiler
+
       - name: 拉取编译工具链
         run: |
           git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b android-8.1.0_r52 --depth=1 gcc
-      - name: 编译内核
+
+      - name: 编译内核和模块
         run: |
           export ARCH=arm64
-          export CROSS_COMPILE=$(pwd)/gcc/bin/aarch64-linux-android-
+          export PATH=$(pwd)/gcc/bin:$PATH
+          export CROSS_COMPILE=aarch64-linux-android-
           make hwcan_defconfig
-          make -j$(nproc)
+          make -j$(nproc) Image.gz modules
+
       - name: 收集模块文件
         run: |
           mkdir -p modules_output
           find . -name "*.ko" -exec cp {} modules_output/ \;
+          if [ $(ls modules_output/*.ko 2>/dev/null | wc -l) -eq 0 ]; then
+            echo "错误：没有编译出任何内核模块"
+            exit 1
+          fi
           echo "共找到 $(ls modules_output/*.ko 2>/dev/null | wc -l) 个模块文件"
+
       - name: 打包AnyKernel3刷机包
         run: |
           git clone https://github.com/osm0sis/AnyKernel3 --depth=1 anykernel
           cp arch/arm64/boot/Image.gz anykernel/
-          cp arch/arm64/boot/dts/qcom/*.dtb anykernel/ 2>/dev/null || cp arch/arm64/boot/dts/*.dtb anykernel/ 2>/dev/null || true
+          DTB_FILE=$(find arch/arm64/boot/dts -name "*can-l02*.dtb" | head -n 1)
+          if [ -n "$DTB_FILE" ]; then
+            cp "$DTB_FILE" anykernel/dtb
+          else
+            echo "错误：找不到 can-l02 对应的 dtb 文件，编译终止"
+            exit 1
+          fi
           mkdir -p anykernel/modules
           cp modules_output/*.ko anykernel/modules/ 2>/dev/null || true
           cd anykernel
-          echo "do.modules=1" >> anykernel.sh
-          echo "module_path=/system/lib/modules" >> anykernel.sh
+
+          # 禁用设备检查，避免刷机时因设备名不匹配被中止
+          sed -i 's/.*do\.devicecheck=.*/do.devicecheck=0/' anykernel.sh
+          grep -q "^do.devicecheck=" anykernel.sh || echo "do.devicecheck=0" >> anykernel.sh
+
+          # DTB 拼接
+          sed -i 's/.*do\.dtb=.*/do.dtb=1/' anykernel.sh
+          grep -q "^do.dtb=" anykernel.sh || echo "do.dtb=1" >> anykernel.sh
+
+          # 模块安装
+          sed -i 's/.*do\.modules=.*/do.modules=1/' anykernel.sh
+          grep -q "^do.modules=" anykernel.sh || echo "do.modules=1" >> anykernel.sh
+
+          sed -i 's/.*module_path=.*/module_path=\/system\/lib\/modules/' anykernel.sh
+          grep -q "^module_path=" anykernel.sh || echo "module_path=/system/lib/modules" >> anykernel.sh
+
           zip -r9 ../kernel-hwcan-nethunter.zip *
           cd ..
+
       - name: 上传完整刷机包
         uses: actions/upload-artifact@v4
         with:
           name: 完整刷机包-含内核和模块
           path: kernel-hwcan-nethunter.zip
+
       - name: 上传模块文件（单独备份）
         uses: actions/upload-artifact@v4
         with:
