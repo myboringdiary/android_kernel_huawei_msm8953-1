@@ -7,10 +7,12 @@ jobs:
     container:
       image: ubuntu:20.04
       options: --user root
+    defaults:
+      run:
+        shell: bash -euxo pipefail {0}
     steps:
       - name: 安装编译依赖（含 Python 2、xz-utils）
         run: |
-          set -euxo pipefail
           apt-get update
           apt-get install -y git ccache automake flex lzop bison gperf build-essential \
             zip curl zlib1g-dev bc kmod cpio libssl-dev device-tree-compiler python2 xz-utils
@@ -24,7 +26,6 @@ jobs:
 
       - name: 拉取编译工具链（带重试并验证）
         run: |
-          set -euxo pipefail
           for i in 1 2 3; do
             rm -rf gcc || true
             git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 \
@@ -39,7 +40,6 @@ jobs:
 
       - name: 修复缺失的 wireguard Kconfig 引用
         run: |
-          set -euxo pipefail
           if [ -f net/Kconfig ]; then
             sed -i 's|source "net/wireguard/Kconfig"|# source "net/wireguard/Kconfig"|' net/Kconfig
           else
@@ -48,7 +48,6 @@ jobs:
 
       - name: 禁用缺失头文件的 hw_fac_info 驱动
         run: |
-          set -euxo pipefail
           if [ -f drivers/hw_fac_info/Makefile ]; then
             sed -i 's/^obj-.*hw_fac_info.*/# &/' drivers/hw_fac_info/Makefile
           else
@@ -57,7 +56,6 @@ jobs:
 
       - name: 创建缺失的 rndis_ipa_trace.h 头文件（使用 printf 避免 heredoc 缩进问题）
         run: |
-          set -euxo pipefail
           mkdir -p drivers/net/ethernet/msm
           printf '%s\n' \
           '/* SPDX-License-Identifier: GPL-2.0 */' \
@@ -116,7 +114,6 @@ jobs:
 
       - name: 设置 swap 空间（容错）
         run: |
-          set -euxo pipefail
           MEM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
           MEM_MB=$((MEM_KB/1024))
           echo "当前内存: ${MEM_MB} MB"
@@ -140,7 +137,6 @@ jobs:
 
       - name: 编译内核和模块（含 dtbs）
         run: |
-          set -euxo pipefail
           export ARCH=arm64
           export PATH="$(pwd)/gcc/bin:$PATH"
           export CROSS_COMPILE="$(pwd)/gcc/bin/aarch64-linux-android-"
@@ -153,7 +149,6 @@ jobs:
 
       - name: 收集模块文件
         run: |
-          set -euxo pipefail
           mkdir -p modules_output
           find . -name "*.ko" -exec cp {} modules_output/ \;
           KO_COUNT=$(find modules_output -maxdepth 1 -type f -name '*.ko' | wc -l)
@@ -165,7 +160,6 @@ jobs:
 
       - name: 打包 AnyKernel3 刷机包
         run: |
-          set -euxo pipefail
           for i in 1 2 3; do
             rm -rf anykernel || true
             git clone https://github.com/osm0sis/AnyKernel3 --depth=1 anykernel && break || sleep 5
