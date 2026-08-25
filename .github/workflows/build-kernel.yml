@@ -24,18 +24,32 @@ jobs:
           submodules: 'recursive'
           fetch-depth: 0
 
-      - name: 拉取编译工具链（带重试并验证）
+      - name: 拉取编译工具链（带重试并验证，使用临时目录避免不完整克隆）
         run: |
           for i in 1 2 3; do
-            rm -rf gcc || true
-            git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 \
-              -b android-8.1.0_r52 --depth=1 gcc && break || sleep 5
+            rm -rf gcc gcc.tmp || true
+            if git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 \
+              -b android-8.1.0_r52 --depth=1 gcc.tmp; then
+              mv gcc.tmp gcc
+              break
+            fi
+            echo "第 ${i} 次克隆失败，等待 5 秒后重试..."
+            sleep 5
           done
-          if [ ! -x gcc/bin/aarch64-linux-android-gcc ]; then
-            echo "错误：交叉编译器缺失"
-            ls -la gcc/bin || true
+
+          if [ ! -d "gcc/bin" ]; then
+            echo "错误：GCC 工具链下载或提取失败，目录 gcc/bin 不存在"
+            ls -la gcc/ || true
             exit 1
           fi
+
+          if [ ! -x gcc/bin/aarch64-linux-android-gcc ]; then
+            echo "错误：交叉编译器缺失或不可执行"
+            ls -la gcc/bin/ || true
+            exit 1
+          fi
+
+          echo "交叉编译器验证成功，版本信息如下："
           gcc/bin/aarch64-linux-android-gcc --version || true
 
       - name: 修复缺失的 wireguard Kconfig 引用
@@ -108,9 +122,18 @@ jobs:
           '#undef TRACE_INCLUDE_FILE' \
           '#define TRACE_INCLUDE_FILE rndis_ipa_trace' \
           '#undef TRACE_INCLUDE_PATH' \
-          '#define TRACE_INCLUDE_PATH drivers/net/ethernet/msm' \
+          '#define TRACE_INCLUDE_PATH ../../drivers/net/ethernet/msm' \
           '#include <trace/define_trace.h>' \
           > drivers/net/ethernet/msm/rndis_ipa_trace.h
+
+      - name: 验证 rndis_ipa_trace.h 已创建
+        run: |
+          if [ ! -f drivers/net/ethernet/msm/rndis_ipa_trace.h ]; then
+            echo "错误：rndis_ipa_trace.h 创建失败"
+            exit 1
+          fi
+          echo "✓ rndis_ipa_trace.h 已成功创建"
+          head -20 drivers/net/ethernet/msm/rndis_ipa_trace.h
 
       - name: 设置 swap 空间（容错）
         run: |
