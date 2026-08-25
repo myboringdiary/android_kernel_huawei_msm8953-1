@@ -28,6 +28,10 @@ jobs:
         run: |
           sed -i 's|source "net/wireguard/Kconfig"|# source "net/wireguard/Kconfig"|' net/Kconfig
 
+      - name: 禁用缺失头文件的 hw_fac_info 驱动
+        run: |
+          sed -i 's/^obj-.*hw_fac_info.*/# &/' drivers/hw_fac_info/Makefile
+
       - name: 编译内核和模块
         run: |
           export ARCH=arm64
