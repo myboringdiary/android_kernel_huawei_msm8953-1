@@ -34,7 +34,7 @@ jobs:
           export PATH=$(pwd)/gcc/bin:$PATH
           export CROSS_COMPILE=aarch64-linux-android-
           make hwcan_defconfig
-          make -j$(nproc) HOSTCFLAGS="-fcommon" Image.gz modules
+          make -j2 V=1 HOSTCFLAGS="-fcommon" Image.gz modules
 
       - name: 收集模块文件
         run: |
@@ -61,15 +61,12 @@ jobs:
           cp modules_output/*.ko anykernel/modules/ 2>/dev/null || true
           cd anykernel
 
-          # 禁用设备检查，避免刷机时因设备名不匹配被中止
           sed -i 's/.*do\.devicecheck=.*/do.devicecheck=0/' anykernel.sh
           grep -q "^do.devicecheck=" anykernel.sh || echo "do.devicecheck=0" >> anykernel.sh
 
-          # DTB 拼接
           sed -i 's/.*do\.dtb=.*/do.dtb=1/' anykernel.sh
           grep -q "^do.dtb=" anykernel.sh || echo "do.dtb=1" >> anykernel.sh
 
-          # 模块安装
           sed -i 's/.*do\.modules=.*/do.modules=1/' anykernel.sh
           grep -q "^do.modules=" anykernel.sh || echo "do.modules=1" >> anykernel.sh
 
