@@ -14,7 +14,6 @@ jobs:
           apt-get install -y git ccache automake flex lzop bison gperf build-essential \
             zip curl zlib1g-dev bc kmod cpio libssl-dev device-tree-compiler python2
           ln -sf /usr/bin/python2 /usr/bin/python
-          ln -sf /usr/bin/python2 /usr/bin/python2.7
 
       - name: 检出代码
         uses: actions/checkout@v4
