@@ -8,139 +8,193 @@ jobs:
       image: ubuntu:20.04
       options: --user root
     steps:
-      - name: 安装编译依赖（含 Python 2）
+      - name: 安装编译依赖（含 Python 2、xz-utils）
         run: |
+          set -euxo pipefail
           apt-get update
           apt-get install -y git ccache automake flex lzop bison gperf build-essential \
-            zip curl zlib1g-dev bc kmod cpio libssl-dev device-tree-compiler python2
+            zip curl zlib1g-dev bc kmod cpio libssl-dev device-tree-compiler python2 xz-utils
           ln -sf /usr/bin/python2 /usr/bin/python
 
       - name: 检出代码
         uses: actions/checkout@v4
         with:
           submodules: 'recursive'
+          fetch-depth: 0
 
-      - name: 拉取编译工具链
+      - name: 拉取编译工具链（带重试并验证）
         run: |
-          git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b android-8.1.0_r52 --depth=1 gcc
+          set -euxo pipefail
+          for i in 1 2 3; do
+            rm -rf gcc || true
+            git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 \
+              -b android-8.1.0_r52 --depth=1 gcc && break || sleep 5
+          done
+          if [ ! -x gcc/bin/aarch64-linux-android-gcc ]; then
+            echo "错误：交叉编译器缺失"
+            ls -la gcc/bin || true
+            exit 1
+          fi
+          gcc/bin/aarch64-linux-android-gcc --version || true
 
       - name: 修复缺失的 wireguard Kconfig 引用
         run: |
-          sed -i 's|source "net/wireguard/Kconfig"|# source "net/wireguard/Kconfig"|' net/Kconfig
+          set -euxo pipefail
+          if [ -f net/Kconfig ]; then
+            sed -i 's|source "net/wireguard/Kconfig"|# source "net/wireguard/Kconfig"|' net/Kconfig
+          else
+            echo "警告：net/Kconfig 不存在，跳过"
+          fi
 
       - name: 禁用缺失头文件的 hw_fac_info 驱动
         run: |
-          sed -i 's/^obj-.*hw_fac_info.*/# &/' drivers/hw_fac_info/Makefile
+          set -euxo pipefail
+          if [ -f drivers/hw_fac_info/Makefile ]; then
+            sed -i 's/^obj-.*hw_fac_info.*/# &/' drivers/hw_fac_info/Makefile
+          else
+            echo "警告：drivers/hw_fac_info/Makefile 不存在，跳过"
+          fi
 
-      - name: 创建缺失的 rndis_ipa_trace.h 头文件
+      - name: 创建缺失的 rndis_ipa_trace.h 头文件（使用 printf 避免 heredoc 缩进问题）
         run: |
+          set -euxo pipefail
           mkdir -p drivers/net/ethernet/msm
-          cat > drivers/net/ethernet/msm/rndis_ipa_trace.h << 'EOF'
-          /* SPDX-License-Identifier: GPL-2.0 */
-          #undef TRACE_SYSTEM
-          #define TRACE_SYSTEM rndis_ipa
+          printf '%s\n' \
+          '/* SPDX-License-Identifier: GPL-2.0 */' \
+          '#undef TRACE_SYSTEM' \
+          '#define TRACE_SYSTEM rndis_ipa' \
+          '' \
+          '#if !defined(_TRACE_RNDIS_IPA_H) || defined(TRACE_HEADER_MULTI_READ)' \
+          '#define _TRACE_RNDIS_IPA_H' \
+          '' \
+          '#include <linux/tracepoint.h>' \
+          '' \
+          'TRACE_EVENT(rndis_tx_dp,' \
+          '    TP_PROTO(int proto),' \
+          '    TP_ARGS(proto),' \
+          '    TP_STRUCT__entry(' \
+          '        __field(int, proto)' \
+          '    ),' \
+          '    TP_fast_assign(' \
+          '        __entry->proto = proto;' \
+          '    ),' \
+          '    TP_printk("proto=%d", __entry->proto)' \
+          ');' \
+          '' \
+          'TRACE_EVENT(rndis_status_rcvd,' \
+          '    TP_PROTO(int proto),' \
+          '    TP_ARGS(proto),' \
+          '    TP_STRUCT__entry(' \
+          '        __field(int, proto)' \
+          '    ),' \
+          '    TP_fast_assign(' \
+          '        __entry->proto = proto;' \
+          '    ),' \
+          '    TP_printk("proto=%d", __entry->proto)' \
+          ');' \
+          '' \
+          'TRACE_EVENT(rndis_netif_ni,' \
+          '    TP_PROTO(int proto),' \
+          '    TP_ARGS(proto),' \
+          '    TP_STRUCT__entry(' \
+          '        __field(int, proto)' \
+          '    ),' \
+          '    TP_fast_assign(' \
+          '        __entry->proto = proto;' \
+          '    ),' \
+          '    TP_printk("proto=%d", __entry->proto)' \
+          ');' \
+          '' \
+          '#endif /* _TRACE_RNDIS_IPA_H */' \
+          '' \
+          '#undef TRACE_INCLUDE_FILE' \
+          '#define TRACE_INCLUDE_FILE rndis_ipa_trace' \
+          '#undef TRACE_INCLUDE_PATH' \
+          '#define TRACE_INCLUDE_PATH drivers/net/ethernet/msm' \
+          '#include <trace/define_trace.h>' \
+          > drivers/net/ethernet/msm/rndis_ipa_trace.h
 
-          #if !defined(_TRACE_RNDIS_IPA_H) || defined(TRACE_HEADER_MULTI_READ)
-          #define _TRACE_RNDIS_IPA_H
-
-          #include <linux/tracepoint.h>
-
-          TRACE_EVENT(rndis_tx_dp,
-              TP_PROTO(int proto),
-              TP_ARGS(proto),
-              TP_STRUCT__entry(
-                  __field(int, proto)
-              ),
-              TP_fast_assign(
-                  __entry->proto = proto;
-              ),
-              TP_printk("proto=%d", __entry->proto)
-          );
-
-          TRACE_EVENT(rndis_status_rcvd,
-              TP_PROTO(int proto),
-              TP_ARGS(proto),
-              TP_STRUCT__entry(
-                  __field(int, proto)
-              ),
-              TP_fast_assign(
-                  __entry->proto = proto;
-              ),
-              TP_printk("proto=%d", __entry->proto)
-          );
-
-          TRACE_EVENT(rndis_netif_ni,
-              TP_PROTO(int proto),
-              TP_ARGS(proto),
-              TP_STRUCT__entry(
-                  __field(int, proto)
-              ),
-              TP_fast_assign(
-                  __entry->proto = proto;
-              ),
-              TP_printk("proto=%d", __entry->proto)
-          );
-
-          #endif /* _TRACE_RNDIS_IPA_H */
-
-          #undef TRACE_INCLUDE_FILE
-          #define TRACE_INCLUDE_FILE rndis_ipa_trace
-          #undef TRACE_INCLUDE_PATH
-          #define TRACE_INCLUDE_PATH drivers/net/ethernet/msm
-          #include <trace/define_trace.h>
-          EOF
-
-      - name: 设置 swap 空间（防止内存不足）
+      - name: 设置 swap 空间（容错）
         run: |
+          set -euxo pipefail
           MEM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
           MEM_MB=$((MEM_KB/1024))
           echo "当前内存: ${MEM_MB} MB"
+          if grep -q swap /proc/filesystems; then
+            echo "系统支持 swap"
+          else
+            echo "系统不支持 swap，跳过"
+          fi
           if [ "$MEM_MB" -lt 12000 ]; then
             fallocate -l 8G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=8192
             chmod 600 /swapfile
             mkswap /swapfile
-            swapon /swapfile
-            echo "已启用 8G swap"
+            if swapon /swapfile 2>/dev/null; then
+              echo "已启用 8G swap"
+            else
+              echo "警告：swapon 不被允许，继续但可能内存不足"
+            fi
           else
             echo "内存充足，跳过 swap"
           fi
 
-      - name: 编译内核和模块
+      - name: 编译内核和模块（含 dtbs）
         run: |
+          set -euxo pipefail
           export ARCH=arm64
-          export PATH=$(pwd)/gcc/bin:$PATH
-          export CROSS_COMPILE=aarch64-linux-android-
+          export PATH="$(pwd)/gcc/bin:$PATH"
+          export CROSS_COMPILE="$(pwd)/gcc/bin/aarch64-linux-android-"
           make hwcan_defconfig
-          make -j2 V=1 HOSTCFLAGS="-fcommon" Image.gz modules
+          MEM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+          MEM_MB=$((MEM_KB/1024))
+          if [ "$MEM_MB" -lt 16000 ]; then JOBS=1; else JOBS=$(nproc); fi
+          echo "使用并发: -j${JOBS}"
+          make -j"${JOBS}" V=1 HOSTCFLAGS="-fcommon" Image.gz modules dtbs
 
       - name: 收集模块文件
         run: |
+          set -euxo pipefail
           mkdir -p modules_output
           find . -name "*.ko" -exec cp {} modules_output/ \;
-          if [ $(ls modules_output/*.ko 2>/dev/null | wc -l) -eq 0 ]; then
+          KO_COUNT=$(find modules_output -maxdepth 1 -type f -name '*.ko' | wc -l)
+          if [ "$KO_COUNT" -eq 0 ]; then
             echo "错误：没有编译出任何内核模块"
             exit 1
           fi
-          echo "共找到 $(ls modules_output/*.ko 2>/dev/null | wc -l) 个模块文件"
+          echo "共找到 ${KO_COUNT} 个模块文件"
 
-      - name: 打包AnyKernel3刷机包
+      - name: 打包 AnyKernel3 刷机包
         run: |
-          git clone https://github.com/osm0sis/AnyKernel3 --depth=1 anykernel
-          cp arch/arm64/boot/Image.gz anykernel/
+          set -euxo pipefail
+          for i in 1 2 3; do
+            rm -rf anykernel || true
+            git clone https://github.com/osm0sis/AnyKernel3 --depth=1 anykernel && break || sleep 5
+          done
+
+          if [ -f arch/arm64/boot/Image.gz ]; then
+            cp -v arch/arm64/boot/Image.gz anykernel/
+          elif [ -f arch/arm64/boot/Image ]; then
+            gzip -c arch/arm64/boot/Image > anykernel/Image.gz
+            echo "已将 Image 压缩为 Image.gz"
+          else
+            echo "错误：找不到内核镜像文件"
+            exit 1
+          fi
 
           echo "=== 所有生成的 dtb 文件 ==="
           find arch/arm64/boot/dts -type f -name "*.dtb" | sed -n '1,200p'
+
           DTB_FILE=$(find arch/arm64/boot/dts -type f -iname "*can-l02*.dtb" -print -quit)
           if [ -n "$DTB_FILE" ]; then
-            cp "$DTB_FILE" anykernel/dtb
+            cp -v "$DTB_FILE" anykernel/dtb
             echo "使用 DTB: $DTB_FILE"
           else
-            echo "错误：找不到 can-l02 对应的 dtb 文件，编译终止"
+            echo "错误：找不到 can-l02 对应的 dtb 文件"
             exit 1
           fi
 
           mkdir -p anykernel/modules
-          cp modules_output/*.ko anykernel/modules/ 2>/dev/null || true
+          cp -v modules_output/*.ko anykernel/modules/ 2>/dev/null || true
           cd anykernel
 
           sed -i 's/.*do\.devicecheck=.*/do.devicecheck=0/' anykernel.sh
