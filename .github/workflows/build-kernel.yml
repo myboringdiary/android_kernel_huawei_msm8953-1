@@ -126,14 +126,30 @@ jobs:
           '#include <trace/define_trace.h>' \
           > drivers/net/ethernet/msm/rndis_ipa_trace.h
 
-      - name: 验证 rndis_ipa_trace.h 已创建
+      - name: 批量修复所有 drivers 下 trace 头文件的 TRACE_INCLUDE_PATH
         run: |
-          if [ ! -f drivers/net/ethernet/msm/rndis_ipa_trace.h ]; then
-            echo "错误：rndis_ipa_trace.h 创建失败"
-            exit 1
-          fi
-          echo "✓ rndis_ipa_trace.h 已成功创建"
-          head -20 drivers/net/ethernet/msm/rndis_ipa_trace.h
+          echo "开始扫描并修复 drivers/ 下所有 *_trace.h 的 TRACE_INCLUDE_PATH"
+          find drivers -name "*_trace.h" -type f | while read -r file; do
+            # 获取该文件所在目录相对于源码根目录的路径（例如 drivers/platform/msm/ipa/ipa_v2）
+            dir=$(dirname "$file")
+            # 正确的 TRACE_INCLUDE_PATH 应为 ../../ 加上该目录路径
+            newpath="../../$dir"
+            if grep -q '^#define TRACE_INCLUDE_PATH' "$file"; then
+              # 替换已有的定义
+              sed -i "s|^#define TRACE_INCLUDE_PATH .*|#define TRACE_INCLUDE_PATH $newpath|" "$file"
+              echo "已修复: $file -> $newpath"
+            else
+              # 如果没有定义，则添加（这种情况很少）
+              echo "警告: $file 中没有 TRACE_INCLUDE_PATH 定义，跳过"
+            fi
+          done
+          echo "批量修复完成"
+
+      - name: 验证关键头文件已就绪
+        run: |
+          test -f drivers/net/ethernet/msm/rndis_ipa_trace.h || { echo "错误：rndis_ipa_trace.h 不存在"; exit 1; }
+          test -f drivers/platform/msm/ipa/ipa_v2/ipa_trace.h || { echo "警告：ipa_trace.h 不存在"; }
+          echo "关键头文件检查通过"
 
       - name: 设置 swap 空间（容错）
         run: |
