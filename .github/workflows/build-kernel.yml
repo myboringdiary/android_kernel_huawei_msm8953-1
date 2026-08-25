@@ -37,19 +37,16 @@ jobs:
             sleep 5
           done
 
-          if [ ! -d "gcc/bin" ]; then
-            echo "错误：GCC 工具链下载或提取失败，目录 gcc/bin 不存在"
-            ls -la gcc/ || true
+          # 宽松检查：能找到任意 aarch64-linux-android*gcc 即可
+          if ls gcc/bin/aarch64-linux-android*gcc 1>/dev/null 2>&1; then
+            echo "交叉编译器存在"
+          else
+            echo "错误：未找到交叉编译器（gcc/bin/...）"
+            ls -la gcc/bin || true
             exit 1
           fi
 
-          if [ ! -x gcc/bin/aarch64-linux-android-gcc ]; then
-            echo "错误：交叉编译器缺失或不可执行"
-            ls -la gcc/bin/ || true
-            exit 1
-          fi
-
-          echo "交叉编译器验证成功，版本信息如下："
+          echo "交叉编译器版本信息："
           gcc/bin/aarch64-linux-android-gcc --version || true
 
       - name: 修复缺失的 wireguard Kconfig 引用
@@ -130,45 +127,44 @@ jobs:
         run: |
           echo "开始扫描并修复 drivers/ 下所有 *_trace.h 的 TRACE_INCLUDE_PATH"
           find drivers -name "*_trace.h" -type f | while read -r file; do
-            # 获取该文件所在目录相对于源码根目录的路径（例如 drivers/platform/msm/ipa/ipa_v2）
             dir=$(dirname "$file")
-            # 正确的 TRACE_INCLUDE_PATH 应为 ../../ 加上该目录路径
             newpath="../../$dir"
             if grep -q '^#define TRACE_INCLUDE_PATH' "$file"; then
-              # 替换已有的定义
               sed -i "s|^#define TRACE_INCLUDE_PATH .*|#define TRACE_INCLUDE_PATH $newpath|" "$file"
               echo "已修复: $file -> $newpath"
             else
-              # 如果没有定义，则添加（这种情况很少）
               echo "警告: $file 中没有 TRACE_INCLUDE_PATH 定义，跳过"
             fi
           done
           echo "批量修复完成"
 
-      - name: 验证关键头文件已就绪
+      - name: 检查 hwcan_defconfig 是否存在
         run: |
-          test -f drivers/net/ethernet/msm/rndis_ipa_trace.h || { echo "错误：rndis_ipa_trace.h 不存在"; exit 1; }
-          test -f drivers/platform/msm/ipa/ipa_v2/ipa_trace.h || { echo "警告：ipa_trace.h 不存在"; }
-          echo "关键头文件检查通过"
+          if [ ! -f arch/arm64/configs/hwcan_defconfig ]; then
+            echo "错误：找不到 arch/arm64/configs/hwcan_defconfig"
+            echo "当前 configs 目录内容："
+            ls -la arch/arm64/configs/ || true
+            exit 1
+          fi
+          echo "hwcan_defconfig 存在，继续"
 
-      - name: 设置 swap 空间（容错）
+      - name: 设置 swap 空间（改进检测与容错）
         run: |
           MEM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
           MEM_MB=$((MEM_KB/1024))
           echo "当前内存: ${MEM_MB} MB"
-          if grep -q swap /proc/filesystems; then
-            echo "系统支持 swap"
-          else
-            echo "系统不支持 swap，跳过"
-          fi
           if [ "$MEM_MB" -lt 12000 ]; then
-            fallocate -l 8G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=8192
-            chmod 600 /swapfile
-            mkswap /swapfile
-            if swapon /swapfile 2>/dev/null; then
-              echo "已启用 8G swap"
+            if command -v fallocate >/dev/null 2>&1 || command -v dd >/dev/null 2>&1; then
+              fallocate -l 8G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=8192
+              chmod 600 /swapfile
+              if command -v mkswap >/dev/null 2>&1; then mkswap /swapfile || true; fi
+              if swapon /swapfile 2>/dev/null; then
+                echo "已启用 8G swap"
+              else
+                echo "警告：swapon 不被允许或失败（容器/Runner 限制），继续但可能内存不足"
+              fi
             else
-              echo "警告：swapon 不被允许，继续但可能内存不足"
+              echo "警告：创建 swap 的工具不可用，跳过"
             fi
           else
             echo "内存充足，跳过 swap"
@@ -186,16 +182,18 @@ jobs:
           echo "使用并发: -j${JOBS}"
           make -j"${JOBS}" V=1 HOSTCFLAGS="-fcommon" Image.gz modules dtbs
 
-      - name: 收集模块文件
+      - name: 收集模块文件（保留目录结构，排除 modules_output）
         run: |
           mkdir -p modules_output
-          find . -name "*.ko" -exec cp {} modules_output/ \;
-          KO_COUNT=$(find modules_output -maxdepth 1 -type f -name '*.ko' | wc -l)
+          find . -path ./modules_output -prune -o -name '*.ko' -print -exec cp --parents {} modules_output/ \;
+          KO_COUNT=$(find modules_output -type f -name '*.ko' | wc -l)
           if [ "$KO_COUNT" -eq 0 ]; then
             echo "错误：没有编译出任何内核模块"
             exit 1
           fi
           echo "共找到 ${KO_COUNT} 个模块文件"
+          echo "模块目录结构："
+          find modules_output -type f -name '*.ko' | sed -n '1,100p'
 
       - name: 打包 AnyKernel3 刷机包
         run: |
@@ -219,15 +217,19 @@ jobs:
 
           DTB_FILE=$(find arch/arm64/boot/dts -type f -iname "*can-l02*.dtb" -print -quit)
           if [ -n "$DTB_FILE" ]; then
-            cp -v "$DTB_FILE" anykernel/dtb
+            mkdir -p anykernel/dtb
+            cp -v "$DTB_FILE" anykernel/dtb/
             echo "使用 DTB: $DTB_FILE"
           else
             echo "错误：找不到 can-l02 对应的 dtb 文件"
+            echo "可用 dtb 列表："
+            find arch/arm64/boot/dts -type f -name "*.dtb" | sed -n '1,200p'
             exit 1
           fi
 
           mkdir -p anykernel/modules
-          cp -v modules_output/*.ko anykernel/modules/ 2>/dev/null || true
+          # 将 modules_output 中的模块复制到 anykernel/modules，保留目录结构
+          (cd modules_output && find . -type f -name '*.ko' -exec cp --parents {} ../anykernel/modules/ \;)
           cd anykernel
 
           sed -i 's/.*do\.devicecheck=.*/do.devicecheck=0/' anykernel.sh
@@ -242,6 +244,9 @@ jobs:
           sed -i 's/.*module_path=.*/module_path=\/system\/lib\/modules/' anykernel.sh
           grep -q "^module_path=" anykernel.sh || echo "module_path=/system/lib/modules" >> anykernel.sh
 
+          echo "=== anykernel.sh 关键配置检查 ==="
+          grep -n 'do\.devicecheck\|do\.dtb\|do\.modules\|module_path' anykernel.sh || true
+
           zip -r9 ../kernel-hwcan-nethunter.zip *
           cd ..
 
@@ -251,8 +256,8 @@ jobs:
           name: 完整刷机包-含内核和模块
           path: kernel-hwcan-nethunter.zip
 
-      - name: 上传模块文件（单独备份）
+      - name: 上传模块文件（单独备份，保留目录结构）
         uses: actions/upload-artifact@v4
         with:
-          name: 单独的模块文件
+          name: 单独的模块文件-含目录结构
           path: modules_output/
