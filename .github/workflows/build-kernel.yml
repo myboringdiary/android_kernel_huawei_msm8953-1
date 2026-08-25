@@ -32,6 +32,25 @@ jobs:
         run: |
           sed -i 's/^obj-.*hw_fac_info.*/# &/' drivers/hw_fac_info/Makefile
 
+      - name: 修复 rndis_ipa_trace.h 的 TRACE_INCLUDE_PATH
+        run: |
+          sed -i 's|^#define TRACE_INCLUDE_PATH \.$|#define TRACE_INCLUDE_PATH drivers/net/ethernet/msm|' drivers/net/ethernet/msm/rndis_ipa_trace.h
+
+      - name: 设置 swap 空间（防止内存不足）
+        run: |
+          MEM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+          MEM_MB=$((MEM_KB/1024))
+          echo "当前内存: ${MEM_MB} MB"
+          if [ "$MEM_MB" -lt 12000 ]; then
+            fallocate -l 8G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=8192
+            chmod 600 /swapfile
+            mkswap /swapfile
+            swapon /swapfile
+            echo "已启用 8G swap"
+          else
+            echo "内存充足，跳过 swap"
+          fi
+
       - name: 编译内核和模块
         run: |
           export ARCH=arm64
@@ -54,13 +73,19 @@ jobs:
         run: |
           git clone https://github.com/osm0sis/AnyKernel3 --depth=1 anykernel
           cp arch/arm64/boot/Image.gz anykernel/
-          DTB_FILE=$(find arch/arm64/boot/dts -name "*can-l02*.dtb" | head -n 1)
+
+          # 查找 DTB（不区分大小写，并打印所有可用 DTB 方便排查）
+          echo "=== 所有生成的 dtb 文件 ==="
+          find arch/arm64/boot/dts -type f -name "*.dtb" | sed -n '1,200p'
+          DTB_FILE=$(find arch/arm64/boot/dts -type f -iname "*can-l02*.dtb" -print -quit)
           if [ -n "$DTB_FILE" ]; then
             cp "$DTB_FILE" anykernel/dtb
+            echo "使用 DTB: $DTB_FILE"
           else
             echo "错误：找不到 can-l02 对应的 dtb 文件，编译终止"
             exit 1
           fi
+
           mkdir -p anykernel/modules
           cp modules_output/*.ko anykernel/modules/ 2>/dev/null || true
           cd anykernel
