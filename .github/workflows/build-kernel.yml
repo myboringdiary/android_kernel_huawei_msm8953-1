@@ -15,6 +15,16 @@ jobs:
           sudo apt update
           sudo apt install -y git ccache automake flex lzop bison gperf build-essential zip curl zlib1g-dev bc kmod cpio libssl-dev device-tree-compiler
 
+      - name: 安装 Python 2.7
+        uses: LizardByte/setup-python-action@v2025
+        with:
+          python-version: '2.7'
+
+      - name: 确保 python 命令可用
+        run: |
+          sudo ln -sf "$(command -v python2.7)" /usr/bin/python2
+          sudo ln -sf "$(command -v python2.7)" /usr/bin/python
+
       - name: 拉取编译工具链
         run: |
           git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b android-8.1.0_r52 --depth=1 gcc
@@ -29,7 +39,7 @@ jobs:
           export PATH=$(pwd)/gcc/bin:$PATH
           export CROSS_COMPILE=aarch64-linux-android-
           make hwcan_defconfig
-          make -j$(nproc) Image.gz modules
+          make -j$(nproc) HOSTCFLAGS="-fcommon" Image.gz modules
 
       - name: 收集模块文件
         run: |
