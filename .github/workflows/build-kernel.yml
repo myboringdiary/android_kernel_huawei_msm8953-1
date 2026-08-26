@@ -176,8 +176,8 @@ jobs:
           make hwcan_defconfig
 
           # ---------- 强制禁用所有冲突配置（循环处理，确保彻底禁用） ----------
-          echo "===== 开始禁用冲突配置（PRIMA/MSM_DBA/PRONTO_WLAN/HUAWEI_FACTORY_INFO/SERIAL_NUM）====="
-          PATTERN='PRIMA|MSM_DBA|PRONTO_WLAN|HUAWEI_FACTORY_INFO|SERIAL_NUM'
+          echo "===== 开始禁用冲突配置（PRIMA/MSM_DBA/PRONTO_WLAN/HUAWEI_FACTORY_INFO/SERIAL_NUM/PN547）====="
+          PATTERN='PRIMA|MSM_DBA|PRONTO_WLAN|HUAWEI_FACTORY_INFO|SERIAL_NUM|PN547'
 
           # 最多循环 5 次，直到没有残留启用项
           for attempt in 1 2 3 4 5; do
