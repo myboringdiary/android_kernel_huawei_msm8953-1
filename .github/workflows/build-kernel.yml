@@ -148,12 +148,56 @@ jobs:
             echo "内存充足，跳过 swap"
           fi
 
-      - name: 编译内核和模块（含 dtbs）
+      - name: 编译内核和模块（含 dtbs，并彻底禁用冲突驱动）
         run: |
           export ARCH=arm64
           export PATH="$(pwd)/gcc/bin:$PATH"
           export CROSS_COMPILE="$(pwd)/gcc/bin/aarch64-linux-android-"
           make hwcan_defconfig
+
+          # ---------- 强制禁用所有冲突配置（精确匹配，避免误伤 WLAN 框架） ----------
+          echo "===== 开始禁用冲突配置（PRIMA/MSM_DBA/HUAWEI_FACTORY_INFO/PRISTON_WLAN）====="
+          # 定义需要匹配的模式：仅 PRIMA 及其直接相关项，不包含通用 WLAN
+          PATTERN='PRIMA|MSM_DBA|HUAWEI_FACTORY_INFO|PRISTON_WLAN'
+          
+          # 找出所有匹配的配置项，并记录
+          CONFLICT_SYMS=$(grep -E "^CONFIG_.*(${PATTERN})" .config | cut -d'=' -f1 | sort -u)
+          if [ -z "$CONFLICT_SYMS" ]; then
+            echo "未找到任何匹配的冲突配置项，跳过。"
+          else
+            echo "找到以下冲突配置项："
+            echo "$CONFLICT_SYMS"
+            # 逐个禁用，先尝试 scripts/config，失败则用 sed 备用
+            for sym in $CONFLICT_SYMS; do
+              name="${sym#CONFIG_}"
+              echo "---- 处理: $sym ----"
+              if scripts/config --file .config --disable "$name" 2>/dev/null; then
+                echo "已通过 scripts/config 禁用 $sym"
+              else
+                echo "scripts/config 禁用失败，尝试 sed 备用方案"
+                # 移除可能存在的 =y 或 =m 行，替换为注释
+                sed -i "s/^${sym}=.*/# ${sym} is not set/" .config
+                echo "已通过 sed 处理 $sym"
+              fi
+            done
+          fi
+
+          # 重新生成有效配置
+          echo "运行 make olddefconfig 以应用更改..."
+          make olddefconfig
+
+          # ---------- 再次检查残留 ----------
+          echo "===== 残留检查（应无 =y 或 =m 项）====="
+          RESIDUAL=$(grep -E "^CONFIG_.*(${PATTERN})" .config | grep -E '=(y|m)$' || true)
+          if [ -n "$RESIDUAL" ]; then
+            echo "错误：以下冲突配置仍被启用，必须修复！"
+            echo "$RESIDUAL"
+            exit 1
+          else
+            echo "通过：无任何冲突配置被启用"
+          fi
+          # ------------------------------------------------
+
           MEM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
           MEM_MB=$((MEM_KB/1024))
           CPUS=$(nproc)
