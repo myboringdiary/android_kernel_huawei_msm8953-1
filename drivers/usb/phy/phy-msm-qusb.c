@@ -27,6 +27,7 @@
 #ifdef CONFIG_HUAWEI_USB
 #include <linux/usb/huawei_usb.h>
 #endif
+int usb_debug;
 
 #ifdef CONFIG_HUAWEI_USB
 #undef pr_err
