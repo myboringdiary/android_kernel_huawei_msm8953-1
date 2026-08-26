@@ -176,8 +176,8 @@ jobs:
           make hwcan_defconfig
 
           # ---------- 强制禁用所有冲突配置（循环处理，确保彻底禁用） ----------
-          echo "===== 开始禁用冲突配置（PRIMA/MSM_DBA/PRISTON_WLAN/HUAWEI_FACTORY_INFO/SERIAL_NUM）====="
-          PATTERN='PRIMA|MSM_DBA|PRISTON_WLAN|HUAWEI_FACTORY_INFO|SERIAL_NUM'
+          echo "===== 开始禁用冲突配置（PRIMA/MSM_DBA/PRONTO_WLAN/HUAWEI_FACTORY_INFO/SERIAL_NUM）====="
+          PATTERN='PRIMA|MSM_DBA|PRONTO_WLAN|HUAWEI_FACTORY_INFO|SERIAL_NUM'
 
           # 最多循环 5 次，直到没有残留启用项
           for attempt in 1 2 3 4 5; do
@@ -212,6 +212,12 @@ jobs:
             exit 1
           else
             echo "通过：无任何冲突配置被启用"
+          fi
+
+          # 最后防线：直接注释掉 drivers/staging/Makefile 中的 prima 行（如果存在）
+          if [ -f drivers/staging/Makefile ]; then
+            echo "尝试注释 drivers/staging/Makefile 中的 prima 相关行（如果存在）"
+            sed -i 's|^obj-\$(CONFIG_PRONTO_WLAN).*prima/.*|# &|' drivers/staging/Makefile || true
           fi
           # ------------------------------------------------
 
