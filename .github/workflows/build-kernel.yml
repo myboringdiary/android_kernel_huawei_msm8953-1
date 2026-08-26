@@ -148,6 +148,21 @@ jobs:
           fi
           echo "hwcan_defconfig 存在，继续"
 
+      - name: 禁用 prima WLAN 驱动（避免编译错误）
+        run: |
+          echo "尝试禁用 prima 驱动编译..."
+          # 方法1：在 drivers/staging/prima/Makefile 中注释掉 obj- 行
+          if [ -f drivers/staging/prima/Makefile ]; then
+            sed -i 's/^obj-/# &/' drivers/staging/prima/Makefile
+            echo "已注释 drivers/staging/prima/Makefile 中的 obj- 行"
+          fi
+          # 方法2：在 drivers/staging/Makefile 中注释掉包含 prima 的行
+          if [ -f drivers/staging/Makefile ]; then
+            sed -i 's/^obj-.*prima.*/# &/' drivers/staging/Makefile
+            echo "已注释 drivers/staging/Makefile 中包含 prima 的行"
+          fi
+          echo "禁用 prima 完成"
+
       - name: 设置 swap 空间（改进检测与容错）
         run: |
           MEM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
