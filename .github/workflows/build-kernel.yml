@@ -183,7 +183,7 @@ jobs:
           for attempt in 1 2 3 4 5; do
             echo "--- 第 ${attempt} 次尝试禁用 ---"
             # 找出当前启用的冲突配置
-            CONFLICT_SYMS=$(grep -E "^CONFIG_.*(${PATTERN})" .config | grep -E '=(y|m)$' | cut -d'=' -f1 | sort -u)
+            CONFLICT_SYMS=$(grep -E "^CONFIG_.*(${PATTERN})" .config | grep -E '=(y|m)$' | cut -d'=' -f1 | sort -u || true)
             if [ -z "$CONFLICT_SYMS" ]; then
               echo "已无启用的冲突配置，完成。"
               break
