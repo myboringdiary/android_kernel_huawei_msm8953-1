@@ -150,16 +150,30 @@ jobs:
       - name: 在 defconfig 中禁用有问题的驱动（prima 和 msm_dba）
         run: |
           echo "禁用 prima WLAN 驱动（CONFIG_PRONTO_WLAN）..."
-          # 删除已有的 CONFIG_PRONTO_WLAN 行（可能有 =y 或 =m）
           sed -i '/CONFIG_PRONTO_WLAN/d' arch/arm64/configs/hwcan_defconfig
-          # 添加明确的禁用行
           echo "# CONFIG_PRONTO_WLAN is not set" >> arch/arm64/configs/hwcan_defconfig
 
           echo "禁用 msm_dba 显示辅助驱动（CONFIG_MSM_DBA）..."
           sed -i '/CONFIG_MSM_DBA/d' arch/arm64/configs/hwcan_defconfig
           echo "# CONFIG_MSM_DBA is not set" >> arch/arm64/configs/hwcan_defconfig
 
-          echo "已更新 defconfig，相关配置项已禁用"
+          echo "defconfig 修改完成"
+
+      - name: 验证问题驱动确实被禁用
+        run: |
+          export ARCH=arm64
+          export PATH="$(pwd)/gcc/bin:$PATH"
+          export CROSS_COMPILE="$(pwd)/gcc/bin/aarch64-linux-android-"
+          make hwcan_defconfig
+          echo "=== 检查 .config 中的相关配置 ==="
+          grep -E "CONFIG_PRONTO_WLAN|CONFIG_MSM_DBA" .config || true
+          # 检查是否被设置为 y 或 m
+          if grep -E "CONFIG_PRONTO_WLAN=[ym]|CONFIG_MSM_DBA=[ym]" .config; then
+            echo "错误：问题驱动仍然被启用，禁用失败"
+            exit 1
+          else
+            echo "✓ 问题驱动已被成功禁用"
+          fi
 
       - name: 设置 swap 空间（改进检测与容错）
         run: |
@@ -188,7 +202,7 @@ jobs:
           export ARCH=arm64
           export PATH="$(pwd)/gcc/bin:$PATH"
           export CROSS_COMPILE="$(pwd)/gcc/bin/aarch64-linux-android-"
-          make hwcan_defconfig
+          # 已经执行过 make hwcan_defconfig 并验证，这里直接编译
           MEM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
           MEM_MB=$((MEM_KB/1024))
           if [ "$MEM_MB" -lt 16000 ]; then JOBS=1; else JOBS=$(nproc); fi
