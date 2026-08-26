@@ -56,7 +56,7 @@ jobs:
             echo "警告：net/Kconfig 不存在，跳过"
           fi
 
-      - name: 禁用缺失头文件的 hw_fac_info 驱动
+      - name: 禁用缺失头文件的 hw_fac_info 驱动（通过 Makefile 注释）
         run: |
           if [ -f drivers/hw_fac_info/Makefile ]; then
             sed -i 's/^obj-.*hw_fac_info.*/# &/' drivers/hw_fac_info/Makefile
@@ -147,38 +147,19 @@ jobs:
           fi
           echo "hwcan_defconfig 存在，继续"
 
-      - name: 禁用 prima WLAN 驱动（避免编译错误）
+      - name: 在 defconfig 中禁用有问题的驱动（prima 和 msm_dba）
         run: |
-          echo "尝试禁用 prima 驱动编译..."
-          if [ -f drivers/staging/prima/Makefile ]; then
-            sed -i 's/^obj-/# &/' drivers/staging/prima/Makefile
-            echo "已注释 drivers/staging/prima/Makefile 中的 obj- 行"
-          fi
-          if [ -f drivers/staging/Makefile ]; then
-            sed -i 's/^[[:space:]]*obj-.*prima.*/# &/' drivers/staging/Makefile
-            echo "已注释 drivers/staging/Makefile 中包含 prima 的行"
-            grep -n "prima" drivers/staging/Makefile || true
-          fi
-          echo "禁用 prima 完成"
+          echo "禁用 prima WLAN 驱动（CONFIG_PRONTO_WLAN）..."
+          # 删除已有的 CONFIG_PRONTO_WLAN 行（可能有 =y 或 =m）
+          sed -i '/CONFIG_PRONTO_WLAN/d' arch/arm64/configs/hwcan_defconfig
+          # 添加明确的禁用行
+          echo "# CONFIG_PRONTO_WLAN is not set" >> arch/arm64/configs/hwcan_defconfig
 
-      - name: 禁用 msm_dba 显示辅助驱动（避免缺失头文件错误）
-        run: |
-          echo "尝试禁用 msm_dba 驱动编译..."
-          # 使用更宽松的模式注释掉任何包含 msm_dba 的行（包括前导空格）
-          if [ -f drivers/video/fbdev/msm/Makefile ]; then
-            sed -i 's/^[[:space:]]*obj-.*msm_dba.*/# &/' drivers/video/fbdev/msm/Makefile
-            echo "已注释 drivers/video/fbdev/msm/Makefile 中 msm_dba 相关行"
-            echo "当前 Makefile 中包含 msm_dba 的行："
-            grep -n "msm_dba" drivers/video/fbdev/msm/Makefile || true
-          else
-            echo "警告：drivers/video/fbdev/msm/Makefile 不存在"
-          fi
-          # 双保险：直接重命名该目录，使 make 无法进入
-          if [ -d drivers/video/fbdev/msm/msm_dba ]; then
-            mv drivers/video/fbdev/msm/msm_dba drivers/video/fbdev/msm/msm_dba_disabled
-            echo "已将 msm_dba 目录重命名为 msm_dba_disabled"
-          fi
-          echo "禁用 msm_dba 完成"
+          echo "禁用 msm_dba 显示辅助驱动（CONFIG_MSM_DBA）..."
+          sed -i '/CONFIG_MSM_DBA/d' arch/arm64/configs/hwcan_defconfig
+          echo "# CONFIG_MSM_DBA is not set" >> arch/arm64/configs/hwcan_defconfig
+
+          echo "已更新 defconfig，相关配置项已禁用"
 
       - name: 设置 swap 空间（改进检测与容错）
         run: |
