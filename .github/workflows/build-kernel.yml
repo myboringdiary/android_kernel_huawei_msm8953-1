@@ -24,7 +24,7 @@ jobs:
           submodules: 'recursive'
           fetch-depth: 0
 
-      - name: 拉取编译工具链（带重试并验证，使用临时目录避免不完整克隆）
+      - name: 拉取编译工具链（带重试并验证）
         run: |
           for i in 1 2 3; do
             rm -rf gcc gcc.tmp || true
@@ -37,7 +37,6 @@ jobs:
             sleep 5
           done
 
-          # 检查编译器及必要工具
           if ! ls gcc/bin/aarch64-linux-android-gcc >/dev/null 2>&1; then
             echo "错误：交叉编译器不存在"
             ls -la gcc/bin || true
@@ -127,39 +126,6 @@ jobs:
           done
           echo "批量修复完成"
 
-      - name: 在 defconfig 中彻底禁用问题驱动
-        run: |
-          # 禁用 prima WLAN (正确配置名: CONFIG_PRISTON_WLAN)
-          sed -i '/CONFIG_PRISTON_WLAN/d' arch/arm64/configs/hwcan_defconfig
-          echo "# CONFIG_PRISTON_WLAN is not set" >> arch/arm64/configs/hwcan_defconfig
-
-          # 禁用 msm_dba (CONFIG_MSM_DBA)
-          sed -i '/CONFIG_MSM_DBA/d' arch/arm64/configs/hwcan_defconfig
-          echo "# CONFIG_MSM_DBA is not set" >> arch/arm64/configs/hwcan_defconfig
-
-          # 禁用 hw_fac_info (CONFIG_HUAWEI_FACTORY_INFO)
-          sed -i '/CONFIG_HUAWEI_FACTORY_INFO/d' arch/arm64/configs/hwcan_defconfig
-          echo "# CONFIG_HUAWEI_FACTORY_INFO is not set" >> arch/arm64/configs/hwcan_defconfig
-
-          echo "defconfig 已更新"
-
-      - name: 生成 .config 并验证禁用是否生效
-        run: |
-          export ARCH=arm64
-          export PATH="$(pwd)/gcc/bin:$PATH"
-          export CROSS_COMPILE="$(pwd)/gcc/bin/aarch64-linux-android-"
-          make hwcan_defconfig
-
-          echo "=== 验证关键配置是否被禁用 ==="
-          for cfg in CONFIG_PRISTON_WLAN CONFIG_MSM_DBA CONFIG_HUAWEI_FACTORY_INFO; do
-            if grep -E "^$cfg=[ym]" .config; then
-              echo "错误：$cfg 仍然被启用！"
-              exit 1
-            else
-              echo "✓ $cfg 已禁用"
-            fi
-          done
-
       - name: 设置 swap 空间（改进检测与容错）
         run: |
           MEM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
@@ -187,7 +153,7 @@ jobs:
           export ARCH=arm64
           export PATH="$(pwd)/gcc/bin:$PATH"
           export CROSS_COMPILE="$(pwd)/gcc/bin/aarch64-linux-android-"
-          # 动态计算并行任务数（每个任务约需 500MB 内存）
+          make hwcan_defconfig
           MEM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
           MEM_MB=$((MEM_KB/1024))
           CPUS=$(nproc)
