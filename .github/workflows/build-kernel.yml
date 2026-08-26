@@ -261,9 +261,12 @@ jobs:
           fi
 
           echo "=== 所有生成的 dtb 文件 ==="
-          find arch/arm64/boot/dts -type f -name "*.dtb" | sed -n '1,200p'
+          find arch/arm/boot/dts -type f -name "*.dtb" | sed -n '1,200p'
 
-          DTB_FILE=$(find arch/arm64/boot/dts -type f -iname "*can-l02*.dtb" -print -quit)
+          DTB_FILE=$(find arch/arm/boot/dts -type f -iname "*can-l02*.dtb" -print -quit)
+          if [ -z "$DTB_FILE" ]; then
+            DTB_FILE=$(find . -type f -iname "*can-l02*.dtb" | head -n1)
+          fi
           if [ -n "$DTB_FILE" ]; then
             mkdir -p anykernel/dtb
             cp -v "$DTB_FILE" anykernel/dtb/
@@ -271,7 +274,7 @@ jobs:
           else
             echo "错误：找不到 can-l02 对应的 dtb 文件"
             echo "可用 dtb 列表："
-            find arch/arm64/boot/dts -type f -name "*.dtb" | sed -n '1,200p'
+            find arch/arm/boot/dts -type f -name "*.dtb" | sed -n '1,200p'
             exit 1
           fi
 
