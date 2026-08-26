@@ -37,7 +37,6 @@ jobs:
             sleep 5
           done
 
-          # 宽松检查：能找到任意 aarch64-linux-android*gcc 即可
           if ls gcc/bin/aarch64-linux-android*gcc 1>/dev/null 2>&1; then
             echo "交叉编译器存在"
           else
@@ -156,23 +155,28 @@ jobs:
             echo "已注释 drivers/staging/prima/Makefile 中的 obj- 行"
           fi
           if [ -f drivers/staging/Makefile ]; then
-            sed -i 's/^obj-.*prima.*/# &/' drivers/staging/Makefile
+            sed -i 's/^[[:space:]]*obj-.*prima.*/# &/' drivers/staging/Makefile
             echo "已注释 drivers/staging/Makefile 中包含 prima 的行"
+            grep -n "prima" drivers/staging/Makefile || true
           fi
           echo "禁用 prima 完成"
 
       - name: 禁用 msm_dba 显示辅助驱动（避免缺失头文件错误）
         run: |
           echo "尝试禁用 msm_dba 驱动编译..."
+          # 使用更宽松的模式注释掉任何包含 msm_dba 的行（包括前导空格）
           if [ -f drivers/video/fbdev/msm/Makefile ]; then
-            sed -i 's/^obj-.*msm_dba.*/# &/' drivers/video/fbdev/msm/Makefile
+            sed -i 's/^[[:space:]]*obj-.*msm_dba.*/# &/' drivers/video/fbdev/msm/Makefile
             echo "已注释 drivers/video/fbdev/msm/Makefile 中 msm_dba 相关行"
+            echo "当前 Makefile 中包含 msm_dba 的行："
+            grep -n "msm_dba" drivers/video/fbdev/msm/Makefile || true
           else
             echo "警告：drivers/video/fbdev/msm/Makefile 不存在"
           fi
-          if [ -f drivers/video/fbdev/msm/msm_dba/Makefile ]; then
-            sed -i 's/^obj-/# &/' drivers/video/fbdev/msm/msm_dba/Makefile
-            echo "已注释 drivers/video/fbdev/msm/msm_dba/Makefile 中的 obj- 行"
+          # 双保险：直接重命名该目录，使 make 无法进入
+          if [ -d drivers/video/fbdev/msm/msm_dba ]; then
+            mv drivers/video/fbdev/msm/msm_dba drivers/video/fbdev/msm/msm_dba_disabled
+            echo "已将 msm_dba 目录重命名为 msm_dba_disabled"
           fi
           echo "禁用 msm_dba 完成"
 
