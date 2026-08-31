@@ -46,9 +46,7 @@
 
 #include "wlan_hdd_assoc.h"
 #include "wlan_hdd_main.h"
-#ifdef CONFIG_CFG80211
 #include "wlan_hdd_p2p.h"
-#endif
 #include "csrNeighborRoam.h"
 #include "csrInternal.h"
 #include "limGlobal.h"
