@@ -175,6 +175,12 @@ jobs:
           export CROSS_COMPILE="$(pwd)/gcc/bin/aarch64-linux-android-"
           make hwcan_defconfig
 
+          # 强制 CFG80211 及内部监管数据库为内建，解决 PRIMA 链接错误
+          scripts/config --file .config --enable CFG80211
+          scripts/config --file .config --enable CFG80211_INTERNAL_REGDB
+          make olddefconfig
+          grep -E '^CONFIG_CFG80211=|^CONFIG_CFG80211_INTERNAL_REGDB=' .config
+
           # ---------- 强制禁用所有冲突配置（循环处理，确保彻底禁用） ----------
           echo "===== 开始禁用冲突配置（MSM_DBA/HUAWEI_FACTORY_INFO/SERIAL_NUM/PN547）====="
           PATTERN='MSM_DBA|HUAWEI_FACTORY_INFO|SERIAL_NUM|PN547'
@@ -202,11 +208,6 @@ jobs:
             # 重新生成配置
             make olddefconfig
           done
-
-          # 强制启用 CFG80211 为内建，避免 PRIMA 链接错误
-          echo "===== 强制启用 CFG80211 (y) ====="
-          scripts/config --file .config --enable CFG80211
-          make olddefconfig
 
           # 最终残留检查
           echo "===== 最终残留检查 ====="
