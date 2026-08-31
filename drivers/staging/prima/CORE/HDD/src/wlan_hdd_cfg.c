@@ -56,6 +56,7 @@
 #include <wlan_hdd_cfg.h>
 #include <linux/string.h>
 #include <vos_types.h>
+#include <sme_Api.h>
 #include <csrApi.h>
 #include <pmcApi.h>
 #include <wlan_hdd_misc.h>
