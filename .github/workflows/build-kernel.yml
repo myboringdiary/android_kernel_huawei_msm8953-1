@@ -203,6 +203,11 @@ jobs:
             make olddefconfig
           done
 
+          # 强制启用 CFG80211 为内建，避免 PRIMA 链接错误
+          echo "===== 强制启用 CFG80211 (y) ====="
+          scripts/config --file .config --enable CFG80211
+          make olddefconfig
+
           # 最终残留检查
           echo "===== 最终残留检查 ====="
           RESIDUAL=$(grep -E "^CONFIG_.*(${PATTERN})" .config | grep -E '=(y|m)$' || true)
