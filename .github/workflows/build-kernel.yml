@@ -175,6 +175,14 @@ jobs:
           export CROSS_COMPILE="$(pwd)/gcc/bin/aarch64-linux-android-"
           make hwcan_defconfig
 
+          # 直接追加 USB configfs 配置，确保启用（仅添加存在的符号）
+          echo "CONFIG_USB_CONFIGFS=y" >> .config
+          echo "CONFIG_USB_CONFIGFS_F_FS=y" >> .config
+          make olddefconfig
+          # 打印确认
+          echo "===== USB_CONFIGFS 检查 ====="
+          grep -E '^CONFIG_USB_CONFIGFS' .config
+
           # 强制 CFG80211 及内部监管数据库为内建，解决 PRIMA 链接错误
           scripts/config --file .config --enable CFG80211
           scripts/config --file .config --enable CFG80211_INTERNAL_REGDB
