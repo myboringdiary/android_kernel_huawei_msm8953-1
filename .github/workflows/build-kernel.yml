@@ -222,22 +222,50 @@ jobs:
           # ------------------------------------------------
 
           # ===== 禁用传统 USB gadget，避免与 configfs 冲突 =====
-          # 使用两种方法确保禁用
           scripts/config --file .config --disable USB_G_ANDROID 2>/dev/null || true
           sed -i 's/^CONFIG_USB_G_ANDROID=y/# CONFIG_USB_G_ANDROID is not set/' .config
           sed -i 's/^CONFIG_USB_G_ANDROID=m/# CONFIG_USB_G_ANDROID is not set/' .config
-          make olddefconfig
 
-          # ===== 强制启用 USB configfs 四个关键配置 =====
+          # ===== 启用 configfs 核心依赖（注意符号为 CONFIG_CONFIGFS_FS） =====
+          echo "CONFIG_CONFIGFS_FS=y" >> .config
+          echo "CONFIG_USB_GADGET=y" >> .config
           echo "CONFIG_USB_CONFIGFS=y" >> .config
           echo "CONFIG_USB_CONFIGFS_F_FS=y" >> .config
           echo "CONFIG_USB_CONFIGFS_F_MTP=y" >> .config
           echo "CONFIG_USB_CONFIGFS_F_PTP=y" >> .config
           make olddefconfig
 
-          # ===== 最终 USB 配置检查 =====
+          # ===== 最终 USB 配置检查（必须全部为 y，否则直接失败） =====
           echo "===== 最终 USB 配置检查 ====="
-          grep -E '^CONFIG_USB_G_ANDROID|^CONFIG_USB_CONFIGFS' .config
+          grep -E '^CONFIG_CONFIGFS_FS=|^CONFIG_USB_GADGET=|^CONFIG_USB_CONFIGFS=|^CONFIG_USB_CONFIGFS_F_FS=|^CONFIG_USB_CONFIGFS_F_MTP=|^CONFIG_USB_CONFIGFS_F_PTP=|^CONFIG_USB_G_ANDROID=' .config
+
+          if ! grep -q '^CONFIG_CONFIGFS_FS=y' .config; then
+            echo "错误：CONFIG_CONFIGFS_FS 未启用！"
+            exit 1
+          fi
+          if ! grep -q '^CONFIG_USB_GADGET=y' .config; then
+            echo "错误：CONFIG_USB_GADGET 未启用！"
+            exit 1
+          fi
+          if ! grep -q '^CONFIG_USB_CONFIGFS=y' .config; then
+            echo "错误：CONFIG_USB_CONFIGFS 未启用！"
+            exit 1
+          fi
+          if ! grep -q '^CONFIG_USB_CONFIGFS_F_FS=y' .config; then
+            echo "错误：CONFIG_USB_CONFIGFS_F_FS 未启用！"
+            exit 1
+          fi
+          if ! grep -q '^CONFIG_USB_CONFIGFS_F_MTP=y' .config; then
+            echo "错误：CONFIG_USB_CONFIGFS_F_MTP 未启用！"
+            exit 1
+          fi
+          if ! grep -q '^CONFIG_USB_CONFIGFS_F_PTP=y' .config; then
+            echo "错误：CONFIG_USB_CONFIGFS_F_PTP 未启用！"
+            exit 1
+          fi
+
+          # 上传最终 .config 作为 artifact（便于排查）
+          cp .config final_config.txt
 
           MEM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
           MEM_MB=$((MEM_KB/1024))
@@ -247,6 +275,12 @@ jobs:
           JOBS=$((JOBS < 1 ? 1 : JOBS))
           echo "使用并发: -j${JOBS} (CPU: ${CPUS}, 内存: ${MEM_MB}MB)"
           make -j"${JOBS}" V=1 HOSTCFLAGS="-fcommon" Image.gz modules dtbs
+
+      - name: 上传最终内核配置
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-config
+          path: final_config.txt
 
       - name: 收集模块文件（保留目录结构，排除 modules_output）
         run: |
