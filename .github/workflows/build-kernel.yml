@@ -132,9 +132,7 @@ jobs:
           if [ -n "$MAKEFILE" ]; then
             echo "找到 Makefile: $MAKEFILE"
             cp "$MAKEFILE" "$MAKEFILE.bak"
-            # 将包含 mdss_dba_utils.o 且以 obj-y 开头的行改为条件编译
             sed -i '/mdss_dba_utils\.o/ s/^obj-y/obj-$(CONFIG_MSM_DBA)/' "$MAKEFILE"
-            # 如果仍然存在 obj-y 且包含该对象，则输出警告（可能格式特殊）
             if grep -E '^\s*obj-y.*mdss_dba_utils\.o' "$MAKEFILE"; then
               echo "警告：自动修改可能不完整，请检查以下行："
               grep -n "mdss_dba_utils" "$MAKEFILE"
@@ -185,10 +183,8 @@ jobs:
           echo "===== 开始禁用冲突配置（MSM_DBA/HUAWEI_FACTORY_INFO/SERIAL_NUM/PN547）====="
           PATTERN='MSM_DBA|HUAWEI_FACTORY_INFO|SERIAL_NUM|PN547'
 
-          # 最多循环 5 次，直到没有残留启用项
           for attempt in 1 2 3 4 5; do
             echo "--- 第 ${attempt} 次尝试禁用 ---"
-            # 找出当前启用的冲突配置
             CONFLICT_SYMS=$(grep -E "^CONFIG_.*(${PATTERN})" .config | grep -E '=(y|m)$' | cut -d'=' -f1 | sort -u || true)
             if [ -z "$CONFLICT_SYMS" ]; then
               echo "已无启用的冲突配置，完成。"
@@ -205,11 +201,9 @@ jobs:
                 sed -i "s/^${sym}=m/# ${sym} is not set/" .config
               }
             done
-            # 重新生成配置
             make olddefconfig
           done
 
-          # 最终残留检查
           echo "===== 最终残留检查 ====="
           RESIDUAL=$(grep -E "^CONFIG_.*(${PATTERN})" .config | grep -E '=(y|m)$' || true)
           if [ -n "$RESIDUAL" ]; then
@@ -233,11 +227,23 @@ jobs:
           echo "CONFIG_USB_CONFIGFS_F_FS=y" >> .config
           echo "CONFIG_USB_CONFIGFS_F_MTP=y" >> .config
           echo "CONFIG_USB_CONFIGFS_F_PTP=y" >> .config
+
+          # ===== 启用 EXTCON，修复 DWC3 Dual Role 模式检测（保留 Host 模式） =====
+          echo "CONFIG_EXTCON=y" >> .config
+          echo "CONFIG_EXTCON_GPIO=y" >> .config
+
+          make olddefconfig
+
+          # 再次强制启用 EXTCON（防止 olddefconfig 因依赖问题关闭）
+          scripts/config --file .config --enable EXTCON 2>/dev/null || true
+          scripts/config --file .config --enable EXTCON_GPIO 2>/dev/null || true
           make olddefconfig
 
           # ===== 最终 USB 配置检查（必须全部为 y，否则直接失败） =====
           echo "===== 最终 USB 配置检查 ====="
           grep -E '^CONFIG_CONFIGFS_FS=|^CONFIG_USB_GADGET=|^CONFIG_USB_CONFIGFS=|^CONFIG_USB_CONFIGFS_F_FS=|^CONFIG_USB_CONFIGFS_F_MTP=|^CONFIG_USB_CONFIGFS_F_PTP=|^CONFIG_USB_G_ANDROID=' .config
+          echo "===== DWC3 模式与 EXTCON 检查 ====="
+          grep -E '^CONFIG_USB_DWC3=|^CONFIG_USB_DWC3_HOST=|^CONFIG_USB_DWC3_GADGET=|^CONFIG_USB_DWC3_DUAL_ROLE=|^CONFIG_EXTCON=|^CONFIG_EXTCON_GPIO=' .config
 
           if ! grep -q '^CONFIG_CONFIGFS_FS=y' .config; then
             echo "错误：CONFIG_CONFIGFS_FS 未启用！"
@@ -261,6 +267,22 @@ jobs:
           fi
           if ! grep -q '^CONFIG_USB_CONFIGFS_F_PTP=y' .config; then
             echo "错误：CONFIG_USB_CONFIGFS_F_PTP 未启用！"
+            exit 1
+          fi
+          if ! grep -q '^CONFIG_EXTCON=y' .config; then
+            echo "错误：CONFIG_EXTCON 未启用！Dual Role 模式将无法检测 USB 状态"
+            exit 1
+          fi
+          if ! grep -q '^CONFIG_EXTCON_GPIO=y' .config; then
+            echo "错误：CONFIG_EXTCON_GPIO 未启用！无法读取 usbid-gpio"
+            exit 1
+          fi
+          if ! grep -q '^CONFIG_USB_DWC3_DUAL_ROLE=y' .config; then
+            echo "错误：CONFIG_USB_DWC3_DUAL_ROLE 未启用！Host 模式将丢失"
+            exit 1
+          fi
+          if grep -q '^CONFIG_USB_DWC3_GADGET=y' .config; then
+            echo "错误：CONFIG_USB_DWC3_GADGET 被启用！这会破坏 Dual Role 模式"
             exit 1
           fi
 
