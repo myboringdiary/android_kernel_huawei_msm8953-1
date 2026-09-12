@@ -131,43 +131,30 @@ jobs:
           fi
           echo "命中文件:"
           echo "$TARGETS"
-
           for f in $TARGETS; do
-            python3 - "$f" << 'PYEOF'
-import sys
-fname = sys.argv[1]
-with open(fname) as f:
-    lines = f.readlines()
-out = []
-for ln in lines:
-    if 'NetHunter: 接入 PMIC ID' in ln:
-        break
-    out.append(ln)
-else:
-    out = lines
-if out and not out[-1].endswith('\n'):
-    out[-1] = out[-1] + '\n'
-patch = '''/* ===== NetHunter: 接入 PMIC ID 中断，恢复 OTG 检测 ===== */
-&usb3 {
-    /delete-property/ interrupts;
-    interrupts-extended = <&intc 0 136 0>,
-                          <&intc 0 220 0>,
-                          <&intc 0 134 0>,
-                          <&spmi_bus 0x2 0x11 0x3>;
-    interrupt-names = "hs_phy_irq", "ss_phy_irq", "pwr_event_irq",
-                      "pmic_id_irq";
-    dwc3@7000000 {
-        dr_mode = "otg";
-    };
-};
-'''
-out.append(patch)
-with open(fname, 'w') as f:
-    f.writelines(out)
-print(f"已修正: {fname}")
-PYEOF
+            [ -f "$f" ] || continue
+            # 去掉旧的 NetHunter 块（若有）
+            awk '/NetHunter: 接入 PMIC ID/{exit} {print}' "$f" > "$f.tmp"
+            mv "$f.tmp" "$f"
+            # 末行若无换行，补一个
+            [ -n "$(tail -c1 "$f")" ] && echo >> "$f" || true
+            # 追加新 patch
+            printf '%s\n' \
+              '/* ===== NetHunter: 接入 PMIC ID 中断，恢复 OTG 检测 ===== */' \
+              '&usb3 {' \
+              '    /delete-property/ interrupts;' \
+              '    interrupts-extended = <&intc 0 136 0>,' \
+              '                          <&intc 0 220 0>,' \
+              '                          <&intc 0 134 0>,' \
+              '                          <&spmi_bus 0x2 0x11 0x3>;' \
+              '    interrupt-names = "hs_phy_irq", "ss_phy_irq", "pwr_event_irq",' \
+              '                      "pmic_id_irq";' \
+              '    dwc3@7000000 {' \
+              '        dr_mode = "otg";' \
+              '    };' \
+              '};' >> "$f"
+            echo "已修正: $f"
           done
-
           echo "===== dts 校验 ====="
           for f in $TARGETS; do
             grep -q 'interrupts-extended' "$f" || { echo "错误: $f 缺少 interrupts-extended"; exit 1; }
@@ -230,7 +217,7 @@ PYEOF
           echo "CONFIG_USB_CONFIGFS_F_PTP=y" >> .config
           make olddefconfig
 
-          # ★★★ 关键：先禁 USB_CI13XXX_MSM（断开它对 USB_MSM_OTG 的 select）
+          # 关键：先禁 USB_CI13XXX_MSM（断开它对 USB_MSM_OTG 的 select）
           for sym in USB_CI13XXX_MSM QPNP_TYPEC HUAWEI_TYPEC DUAL_ROLE_USB_INTF EXTCON EXTCON_GPIO; do
             scripts/config --file .config --disable "$sym" 2>/dev/null || true
             sed -i "s/^CONFIG_${sym}=y/# CONFIG_${sym} is not set/" .config
@@ -239,7 +226,7 @@ PYEOF
           make olddefconfig
 
           # ============================================================
-          # ★★★ 六道防线：彻底断掉 select 链与 silentoldconfig 翻回
+          # 六道防线：彻底断掉 select 链与 silentoldconfig 翻回
           # ============================================================
           KILL_SYMS="USB_MSM_OTG USB_MSM_HSPHY USB_CI13XXX_MSM QPNP_TYPEC HUAWEI_TYPEC DUAL_ROLE_USB_INTF EXTCON EXTCON_GPIO USB_G_ANDROID"
 
@@ -262,42 +249,25 @@ PYEOF
               echo "  $sym 被翻回 =y"
             fi
           done
-          [ -z "$FLIPPED" ] && echo "  (无，前 2 道已解决全部)"
+          [ -z "$FLIPPED" ] && echo "  (无，前 2 道已解决全部)" || true
 
-          # ---- 第 3 道：注释 Kconfig 中的 select 源（python 精确匹配） ----
+          # ---- 第 3 道：注释 Kconfig 中的 select 源（sed 版） ----
           if [ -n "$FLIPPED" ]; then
             echo "===== 第 3 道：在 Kconfig 中注释 select 源 ====="
             for sym in $FLIPPED; do
               echo "--- 处理 $sym ---"
-              python3 - "$sym" << 'PYEOF'
-import sys, re, os, subprocess
-sym = sys.argv[1]
-try:
-    out = subprocess.check_output(
-        ['grep', '-rl', f'select {sym}', 'drivers/', 'arch/'],
-        stderr=subprocess.DEVNULL, text=True
-    ).strip().split('\n')
-except subprocess.CalledProcessError:
-    out = []
-out = [f for f in out if f and os.path.isfile(f)]
-if not out:
-    print(f"  未找到显式 select {sym}（可能是 depends/default/imply 引起）")
-else:
-    pattern = re.compile(rf'^(\s*)select\s+{re.escape(sym)}\s*$')
-    for kf in out:
-        with open(kf) as f:
-            lines = f.readlines()
-        changed = False
-        for i, ln in enumerate(lines):
-            m = pattern.match(ln.rstrip('\n'))
-            if m:
-                lines[i] = f"{m.group(1)}# select {sym}  # disabled by NetHunter\n"
-                changed = True
-                print(f"  已注释 {kf}:{i+1}  select {sym}")
-        if changed:
-            with open(kf, 'w') as f:
-                f.writelines(lines)
-PYEOF
+              HITS=$(grep -rl "select ${sym}" drivers/ arch/ 2>/dev/null || true)
+              if [ -z "$HITS" ]; then
+                echo "  未找到显式 select ${sym}（可能是 depends/default/imply 引起）"
+              else
+                for kf in $HITS; do
+                  [ -f "$kf" ] || continue
+                  before=$(grep -cE "^[[:space:]]*select ${sym}[[:space:]]*$" "$kf" || true)
+                  sed -i "s|^\([[:space:]]*\)select ${sym}[[:space:]]*$|\1# select ${sym}  # disabled by NetHunter|" "$kf"
+                  after=$(grep -cE "^[[:space:]]*select ${sym}[[:space:]]*$" "$kf" || true)
+                  [ "$before" != "$after" ] && echo "  已注释 $kf 中的 select ${sym}" || true
+                done
+              fi
             done
           fi
 
@@ -323,7 +293,6 @@ PYEOF
             for sym in $KILL_SYMS; do
               echo "# CONFIG_${sym} is not set" >> include/config/auto.conf
             done
-            # 只让 auto.conf 比 .config 新，不要动 .config 的 mtime
             touch include/config/auto.conf
           else
             echo "警告：include/config/auto.conf 不存在，无法手工同步"
@@ -352,14 +321,14 @@ PYEOF
           CPUS=$(nproc)
           MAX_JOBS=$((MEM_MB / 500))
           JOBS=$((MAX_JOBS < CPUS ? MAX_JOBS : CPUS))
-          [ "$JOBS" -lt 1 ] && JOBS=1
+          [ "$JOBS" -lt 1 ] && JOBS=1 || true
           echo "使用并发: -j${JOBS} (CPU: ${CPUS}, 内存: ${MEM_MB}MB)"
 
           # ★★★ 编译
           make -j"${JOBS}" V=1 HOSTCFLAGS="-fcommon" Image.gz-dtb modules
 
           # ============================================================
-          # ★★★ 编译后验证：auto.conf 是否被 silentoldconfig 改回
+          # 编译后验证：auto.conf 是否被 silentoldconfig 改回
           # ============================================================
           echo "===== 编译后验证 ====="
           echo "--- .config 实际值 ---"
