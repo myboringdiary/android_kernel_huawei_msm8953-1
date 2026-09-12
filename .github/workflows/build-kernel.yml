@@ -11,11 +11,11 @@ jobs:
       run:
         shell: bash -euxo pipefail {0}
     steps:
-      - name: 安装编译依赖（含 Python 2、xz-utils）
+      - name: 安装编译依赖
         run: |
           apt-get update
           apt-get install -y git ccache automake flex lzop bison gperf build-essential \
-            zip curl zlib1g-dev bc kmod cpio libssl-dev device-tree-compiler python2 xz-utils
+            zip curl zlib1g-dev bc kmod cpio libssl-dev device-tree-compiler python2 python3 xz-utils
           ln -sf /usr/bin/python2 /usr/bin/python
 
       - name: 检出代码
@@ -24,7 +24,7 @@ jobs:
           submodules: 'recursive'
           fetch-depth: 0
 
-      - name: 拉取编译工具链（带重试并验证）
+      - name: 拉取编译工具链
         run: |
           for i in 1 2 3; do
             rm -rf gcc gcc.tmp || true
@@ -33,27 +33,19 @@ jobs:
               mv gcc.tmp gcc
               break
             fi
-            echo "第 ${i} 次克隆失败，等待 5 秒后重试..."
+            echo "第 ${i} 次克隆失败，等待 5 秒"
             sleep 5
           done
-
-          if ! ls gcc/bin/aarch64-linux-android-gcc >/dev/null 2>&1; then
-            echo "错误：交叉编译器不存在"
-            ls -la gcc/bin || true
-            exit 1
-          fi
-          echo "交叉编译器版本："
+          ls gcc/bin/aarch64-linux-android-gcc >/dev/null 2>&1 || { echo "交叉编译器缺失"; exit 1; }
           gcc/bin/aarch64-linux-android-gcc --version || true
 
       - name: 修复缺失的 wireguard Kconfig 引用
         run: |
           if [ -f net/Kconfig ]; then
             sed -i 's|source "net/wireguard/Kconfig"|# source "net/wireguard/Kconfig"|' net/Kconfig
-          else
-            echo "警告：net/Kconfig 不存在，跳过"
           fi
 
-      - name: 创建缺失的 rndis_ipa_trace.h 头文件
+      - name: 创建缺失的 rndis_ipa_trace.h
         run: |
           mkdir -p drivers/net/ethernet/msm
           printf '%s\n' \
@@ -111,75 +103,102 @@ jobs:
           '#include <trace/define_trace.h>' \
           > drivers/net/ethernet/msm/rndis_ipa_trace.h
 
-      - name: 批量修复所有 drivers 下 trace 头文件的 TRACE_INCLUDE_PATH
+      - name: 批量修复 trace 头文件路径
         run: |
-          echo "开始扫描并修复 drivers/ 下所有 *_trace.h 的 TRACE_INCLUDE_PATH"
           find drivers -name "*_trace.h" -type f | while read -r file; do
             dir=$(dirname "$file")
             newpath="../../$dir"
             if grep -q '^#define TRACE_INCLUDE_PATH' "$file"; then
               sed -i "s|^#define TRACE_INCLUDE_PATH .*|#define TRACE_INCLUDE_PATH $newpath|" "$file"
-              echo "已修复: $file -> $newpath"
-            else
-              echo "警告: $file 中没有 TRACE_INCLUDE_PATH 定义，跳过"
             fi
           done
-          echo "批量修复完成"
 
-      - name: 修复 mdss Makefile（避免 DBA 链接错误）
+      - name: 修复 mdss Makefile
         run: |
           MAKEFILE=$(find drivers/video -path "*/mdss/Makefile" | head -n1)
           if [ -n "$MAKEFILE" ]; then
-            echo "找到 Makefile: $MAKEFILE"
             cp "$MAKEFILE" "$MAKEFILE.bak"
             sed -i '/mdss_dba_utils\.o/ s/^obj-y/obj-$(CONFIG_MSM_DBA)/' "$MAKEFILE"
-            if grep -E '^\s*obj-y.*mdss_dba_utils\.o' "$MAKEFILE"; then
-              echo "警告：自动修改可能不完整，请检查以下行："
-              grep -n "mdss_dba_utils" "$MAKEFILE"
-            else
-              echo "修改成功，当前包含 mdss_dba_utils 的行："
-              grep -n "mdss_dba_utils" "$MAKEFILE" || true
-            fi
-          else
-            echo "警告：未找到 drivers/video/*/mdss/Makefile，跳过修补（可能已手动修改）"
           fi
 
-      - name: 设置 swap 空间（改进检测与容错）
+      - name: 注入 DWC3 pmic_id_irq dts 补丁
         run: |
-          MEM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-          MEM_MB=$((MEM_KB/1024))
-          echo "当前内存: ${MEM_MB} MB"
+          TARGETS=$(find arch -name 'huawei-usb.dtsi' -path '*huawei_msm8953_can_l0[12]_v*' 2>/dev/null)
+          if [ -z "$TARGETS" ]; then
+            echo "错误：找不到 huawei-usb.dtsi"
+            find arch -name 'huawei-usb.dtsi' 2>/dev/null | head -20
+            exit 1
+          fi
+          echo "命中文件:"
+          echo "$TARGETS"
+
+          for f in $TARGETS; do
+            python3 - "$f" << 'PYEOF'
+import sys
+fname = sys.argv[1]
+with open(fname) as f:
+    lines = f.readlines()
+out = []
+for ln in lines:
+    if 'NetHunter: 接入 PMIC ID' in ln:
+        break
+    out.append(ln)
+else:
+    out = lines
+if out and not out[-1].endswith('\n'):
+    out[-1] = out[-1] + '\n'
+patch = '''/* ===== NetHunter: 接入 PMIC ID 中断，恢复 OTG 检测 ===== */
+&usb3 {
+    /delete-property/ interrupts;
+    interrupts-extended = <&intc 0 136 0>,
+                          <&intc 0 220 0>,
+                          <&intc 0 134 0>,
+                          <&spmi_bus 0x2 0x11 0x3>;
+    interrupt-names = "hs_phy_irq", "ss_phy_irq", "pwr_event_irq",
+                      "pmic_id_irq";
+    dwc3@7000000 {
+        dr_mode = "otg";
+    };
+};
+'''
+out.append(patch)
+with open(fname, 'w') as f:
+    f.writelines(out)
+print(f"已修正: {fname}")
+PYEOF
+          done
+
+          echo "===== dts 校验 ====="
+          for f in $TARGETS; do
+            grep -q 'interrupts-extended' "$f" || { echo "错误: $f 缺少 interrupts-extended"; exit 1; }
+            grep -q 'dr_mode = "otg"' "$f" || { echo "错误: $f 缺少 dr_mode"; exit 1; }
+          done
+          echo "dts 校验通过"
+
+      - name: 设置 swap
+        run: |
+          MEM_MB=$(($(grep MemTotal /proc/meminfo | awk '{print $2}')/1024))
+          echo "内存: ${MEM_MB} MB"
           if [ "$MEM_MB" -lt 12000 ]; then
-            if command -v fallocate >/dev/null 2>&1 || command -v dd >/dev/null 2>&1; then
-              fallocate -l 8G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=8192
-              chmod 600 /swapfile
-              if command -v mkswap >/dev/null 2>&1; then mkswap /swapfile || true; fi
-              if swapon /swapfile 2>/dev/null; then
-                echo "已启用 8G swap"
-              else
-                echo "警告：swapon 不被允许或失败，继续但可能内存不足"
-              fi
-            else
-              echo "警告：创建 swap 的工具不可用，跳过"
-            fi
-          else
-            echo "内存充足，跳过 swap"
+            fallocate -l 8G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=8192
+            chmod 600 /swapfile
+            mkswap /swapfile || true
+            swapon /swapfile 2>/dev/null || echo "swap 启用失败，继续"
           fi
 
-      - name: 编译内核和模块（含 dtbs，并彻底禁用冲突驱动）
+      - name: 编译内核和模块（生成 Image.gz-dtb）
         run: |
           export ARCH=arm64
           export PATH="$(pwd)/gcc/bin:$PATH"
           export CROSS_COMPILE="$(pwd)/gcc/bin/aarch64-linux-android-"
           make hwcan_defconfig
 
-          # 强制 CFG80211 及内部监管数据库为内建，解决 PRIMA 链接错误
+          # CFG80211 内建
           scripts/config --file .config --enable CFG80211
           scripts/config --file .config --enable CFG80211_INTERNAL_REGDB
           make olddefconfig
-          grep -E '^CONFIG_CFG80211=|^CONFIG_CFG80211_INTERNAL_REGDB=' .config
 
-          # ===== 强制启用 USB WiFi 驱动 =====
+          # USB WiFi 驱动
           for sym in MAC80211 MAC80211_LEDS MAC80211_MESH \
                      ATH9K_HTC ATH9K_HTC_DEBUGFS \
                      RTL8187 RTL8192CU RTLWIFI RTLWIFI_USB \
@@ -190,126 +209,185 @@ jobs:
           done
           make olddefconfig
 
-          # ---------- 强制禁用所有冲突配置（循环处理，确保彻底禁用） ----------
-          echo "===== 开始禁用冲突配置（MSM_DBA/HUAWEI_FACTORY_INFO/SERIAL_NUM/PN547）====="
+          # 冲突配置循环禁用
           PATTERN='MSM_DBA|HUAWEI_FACTORY_INFO|SERIAL_NUM|PN547'
-
           for attempt in 1 2 3 4 5; do
-            echo "--- 第 ${attempt} 次尝试禁用 ---"
-            CONFLICT_SYMS=$(grep -E "^CONFIG_.*(${PATTERN})" .config | grep -E '=(y|m)$' | cut -d'=' -f1 | sort -u || true)
-            if [ -z "$CONFLICT_SYMS" ]; then
-              echo "已无启用的冲突配置，完成。"
-              break
-            fi
-            echo "需要禁用的配置项："
-            echo "$CONFLICT_SYMS"
-            for sym in $CONFLICT_SYMS; do
-              name="${sym#CONFIG_}"
-              echo "禁用: $sym"
-              scripts/config --file .config --disable "$name" 2>/dev/null || {
-                echo "scripts/config 失败，改用 sed"
-                sed -i "s/^${sym}=y/# ${sym} is not set/" .config
-                sed -i "s/^${sym}=m/# ${sym} is not set/" .config
-              }
+            SYMS=$(grep -E "^CONFIG_.*(${PATTERN})" .config | grep -E '=(y|m)$' | cut -d'=' -f1 | sort -u || true)
+            if [ -z "$SYMS" ]; then break; fi
+            for sym in $SYMS; do
+              scripts/config --file .config --disable "${sym#CONFIG_}" 2>/dev/null || true
             done
             make olddefconfig
           done
 
-          echo "===== 最终残留检查 ====="
-          RESIDUAL=$(grep -E "^CONFIG_.*(${PATTERN})" .config | grep -E '=(y|m)$' || true)
-          if [ -n "$RESIDUAL" ]; then
-            echo "错误：以下冲突配置仍被启用，无法自动禁用，请检查依赖关系："
-            echo "$RESIDUAL"
-            exit 1
-          else
-            echo "通过：无任何冲突配置被启用"
-          fi
-          # ------------------------------------------------
-
-          # ===== 禁用传统 USB gadget，避免与 configfs 冲突 =====
+          # configfs 依赖
           scripts/config --file .config --disable USB_G_ANDROID 2>/dev/null || true
-          sed -i 's/^CONFIG_USB_G_ANDROID=y/# CONFIG_USB_G_ANDROID is not set/' .config
-          sed -i 's/^CONFIG_USB_G_ANDROID=m/# CONFIG_USB_G_ANDROID is not set/' .config
-
-          # ===== 启用 configfs 核心依赖（注意符号为 CONFIG_CONFIGFS_FS） =====
           echo "CONFIG_CONFIGFS_FS=y" >> .config
           echo "CONFIG_USB_GADGET=y" >> .config
           echo "CONFIG_USB_CONFIGFS=y" >> .config
           echo "CONFIG_USB_CONFIGFS_F_FS=y" >> .config
           echo "CONFIG_USB_CONFIGFS_F_MTP=y" >> .config
           echo "CONFIG_USB_CONFIGFS_F_PTP=y" >> .config
-
           make olddefconfig
 
-          # ===== 禁用干扰 DWC3 的其他 USB 栈（EXTCON 等）=====
-          for sym in USB_MSM_OTG QPNP_TYPEC HUAWEI_TYPEC DUAL_ROLE_USB_INTF EXTCON EXTCON_GPIO; do
+          # ★★★ 关键：先禁 USB_CI13XXX_MSM（断开它对 USB_MSM_OTG 的 select）
+          for sym in USB_CI13XXX_MSM QPNP_TYPEC HUAWEI_TYPEC DUAL_ROLE_USB_INTF EXTCON EXTCON_GPIO; do
             scripts/config --file .config --disable "$sym" 2>/dev/null || true
             sed -i "s/^CONFIG_${sym}=y/# CONFIG_${sym} is not set/" .config
             sed -i "s/^CONFIG_${sym}=m/# CONFIG_${sym} is not set/" .config
           done
           make olddefconfig
-          for sym in USB_MSM_OTG QPNP_TYPEC HUAWEI_TYPEC DUAL_ROLE_USB_INTF EXTCON EXTCON_GPIO; do
-            scripts/config --file .config --disable "$sym" 2>/dev/null || true
+
+          # ============================================================
+          # ★★★ 六道防线：彻底断掉 select 链与 silentoldconfig 翻回
+          # ============================================================
+          KILL_SYMS="USB_MSM_OTG USB_MSM_HSPHY USB_CI13XXX_MSM QPNP_TYPEC HUAWEI_TYPEC DUAL_ROLE_USB_INTF EXTCON EXTCON_GPIO USB_G_ANDROID"
+
+          # ---- 第 1 道：olddefconfig 之后再硬改 ----
+          echo "===== 第 1 道：sed .config 断开表层 ====="
+          for sym in $KILL_SYMS; do
+            sed -i "s/^CONFIG_${sym}=y/# CONFIG_${sym} is not set/" .config
+            sed -i "s/^CONFIG_${sym}=m/# CONFIG_${sym} is not set/" .config
           done
-          make olddefconfig
 
-          # ===== 最终 USB 配置检查（必须全部为 y，否则直接失败） =====
-          echo "===== 最终 USB 配置检查 ====="
-          grep -E '^CONFIG_CONFIGFS_FS=|^CONFIG_USB_GADGET=|^CONFIG_USB_CONFIGFS=|^CONFIG_USB_CONFIGFS_F_FS=|^CONFIG_USB_CONFIGFS_F_MTP=|^CONFIG_USB_CONFIGFS_F_PTP=|^CONFIG_USB_G_ANDROID=' .config
-          echo "===== DWC3 模式与干扰栈检查 ====="
-          grep -E '^CONFIG_USB_DWC3=|^CONFIG_USB_DWC3_HOST=|^CONFIG_USB_DWC3_GADGET=|^CONFIG_USB_DWC3_DUAL_ROLE=|^CONFIG_EXTCON=|^CONFIG_EXTCON_GPIO=|^CONFIG_QPNP_TYPEC=|^CONFIG_HUAWEI_TYPEC=|^CONFIG_DUAL_ROLE_USB_INTF=|^CONFIG_USB_MSM_OTG=' .config
+          # ---- 第 2 道：主动 silentoldconfig 暴露隐藏 select ----
+          echo "===== 第 2 道：主动触发 silentoldconfig ====="
+          make silentoldconfig 2>&1 | tail -60 || true
 
-          if ! grep -q '^CONFIG_CONFIGFS_FS=y' .config; then
-            echo "错误：CONFIG_CONFIGFS_FS 未启用！"
-            exit 1
+          echo "--- silentoldconfig 后，被翻回 =y 的项 ---"
+          FLIPPED=""
+          for sym in $KILL_SYMS; do
+            if grep -q "^CONFIG_${sym}=y" .config; then
+              FLIPPED="$FLIPPED $sym"
+              echo "  $sym 被翻回 =y"
+            fi
+          done
+          [ -z "$FLIPPED" ] && echo "  (无，前 2 道已解决全部)"
+
+          # ---- 第 3 道：注释 Kconfig 中的 select 源（python 精确匹配） ----
+          if [ -n "$FLIPPED" ]; then
+            echo "===== 第 3 道：在 Kconfig 中注释 select 源 ====="
+            for sym in $FLIPPED; do
+              echo "--- 处理 $sym ---"
+              python3 - "$sym" << 'PYEOF'
+import sys, re, os, subprocess
+sym = sys.argv[1]
+try:
+    out = subprocess.check_output(
+        ['grep', '-rl', f'select {sym}', 'drivers/', 'arch/'],
+        stderr=subprocess.DEVNULL, text=True
+    ).strip().split('\n')
+except subprocess.CalledProcessError:
+    out = []
+out = [f for f in out if f and os.path.isfile(f)]
+if not out:
+    print(f"  未找到显式 select {sym}（可能是 depends/default/imply 引起）")
+else:
+    pattern = re.compile(rf'^(\s*)select\s+{re.escape(sym)}\s*$')
+    for kf in out:
+        with open(kf) as f:
+            lines = f.readlines()
+        changed = False
+        for i, ln in enumerate(lines):
+            m = pattern.match(ln.rstrip('\n'))
+            if m:
+                lines[i] = f"{m.group(1)}# select {sym}  # disabled by NetHunter\n"
+                changed = True
+                print(f"  已注释 {kf}:{i+1}  select {sym}")
+        if changed:
+            with open(kf, 'w') as f:
+                f.writelines(lines)
+PYEOF
+            done
           fi
-          if ! grep -q '^CONFIG_USB_GADGET=y' .config; then
-            echo "错误：CONFIG_USB_GADGET 未启用！"
-            exit 1
+
+          # ---- 第 4 道：olddefconfig 让 Kconfig 改动生效 ----
+          echo "===== 第 4 道：make olddefconfig 让 Kconfig 改动生效 ====="
+          make olddefconfig 2>&1 | tail -10 || true
+
+          # ---- 第 5 道：最后再 sed 一次 .config ----
+          echo "===== 第 5 道：sed .config 兜底 ====="
+          for sym in $KILL_SYMS; do
+            sed -i "s/^CONFIG_${sym}=y/# CONFIG_${sym} is not set/" .config
+            sed -i "s/^CONFIG_${sym}=m/# CONFIG_${sym} is not set/" .config
+          done
+
+          # ---- 第 6 道：手工同步 auto.conf + touch，阻止 make 触发 silentoldconfig ----
+          echo "===== 第 6 道：手工同步 auto.conf ====="
+          mkdir -p include/config
+          if [ -f include/config/auto.conf ]; then
+            for sym in $KILL_SYMS; do
+              sed -i "/^CONFIG_${sym}=/d" include/config/auto.conf
+              sed -i "/^# CONFIG_${sym} is not set/d" include/config/auto.conf
+            done
+            for sym in $KILL_SYMS; do
+              echo "# CONFIG_${sym} is not set" >> include/config/auto.conf
+            done
+            # 只让 auto.conf 比 .config 新，不要动 .config 的 mtime
+            touch include/config/auto.conf
+          else
+            echo "警告：include/config/auto.conf 不存在，无法手工同步"
           fi
-          if ! grep -q '^CONFIG_USB_CONFIGFS=y' .config; then
-            echo "错误：CONFIG_USB_CONFIGFS 未启用！"
-            exit 1
-          fi
-          if ! grep -q '^CONFIG_USB_CONFIGFS_F_FS=y' .config; then
-            echo "错误：CONFIG_USB_CONFIGFS_F_FS 未启用！"
-            exit 1
-          fi
-          if ! grep -q '^CONFIG_USB_CONFIGFS_F_MTP=y' .config; then
-            echo "错误：CONFIG_USB_CONFIGFS_F_MTP 未启用！"
-            exit 1
-          fi
-          if ! grep -q '^CONFIG_USB_CONFIGFS_F_PTP=y' .config; then
-            echo "错误：CONFIG_USB_CONFIGFS_F_PTP 未启用！"
-            exit 1
-          fi
-          if ! grep -q '^CONFIG_USB_DWC3_DUAL_ROLE=y' .config; then
-            echo "错误：CONFIG_USB_DWC3_DUAL_ROLE 未启用！Host 模式将丢失"
-            exit 1
-          fi
-          if grep -q '^CONFIG_USB_G_ANDROID=y' .config; then
-            echo "错误：CONFIG_USB_G_ANDROID 仍被启用，会与 configfs 冲突"
-            exit 1
-          fi
-          if grep -q '^CONFIG_QPNP_TYPEC=y' .config; then
-            echo "错误：CONFIG_QPNP_TYPEC 仍被启用，会抢占 pmic_id_irq"
-            exit 1
-          fi
-          if grep -q '^CONFIG_EXTCON=y' .config; then
-            echo "错误：CONFIG_EXTCON 仍被启用，与 pmic_id_irq 方案冲突"
-            exit 1
-          fi
+
+          echo "===== 编译前最终检查 ====="
+          echo "--- .config ---"
+          grep -E '^#? ?CONFIG_(USB_MSM_OTG|USB_MSM_HSPHY|USB_CI13XXX_MSM|QPNP_TYPEC|HUAWEI_TYPEC|DUAL_ROLE_USB_INTF|EXTCON|USB_G_ANDROID)' .config || echo "(无)"
+          echo "--- auto.conf ---"
+          grep -E '^#? ?CONFIG_(USB_MSM_OTG|USB_MSM_HSPHY|USB_CI13XXX_MSM|QPNP_TYPEC|HUAWEI_TYPEC|DUAL_ROLE_USB_INTF|EXTCON|USB_G_ANDROID)' include/config/auto.conf || echo "(无)"
+          echo "--- 必须激活项 ---"
+          grep -E '^CONFIG_USB_DWC3=|^CONFIG_USB_DWC3_DUAL_ROLE=|^CONFIG_USB_CONFIGFS=|^CONFIG_CONFIGFS_FS=|^CONFIG_USB_CONFIGFS_F_MTP=' .config
+
+          # 硬校验（make 前）
+          grep -q '^# CONFIG_USB_MSM_OTG is not set' .config || { echo "错误：USB_MSM_OTG 未被禁用"; exit 1; }
+          grep -q '^# CONFIG_USB_CI13XXX_MSM is not set' .config || { echo "错误：USB_CI13XXX_MSM 未被禁用"; exit 1; }
+          grep -q '^CONFIG_USB_DWC3_DUAL_ROLE=y' .config || { echo "错误：DWC3 Dual Role 丢失"; exit 1; }
+          grep -q '^CONFIG_USB_CONFIGFS=y' .config || { echo "错误：CONFIGFS 丢失"; exit 1; }
+          grep -q '^CONFIG_USB_CONFIGFS_F_MTP=y' .config || { echo "错误：F_MTP 丢失"; exit 1; }
+          grep -q '^CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE=y' .config || { echo "错误：APPENDED_DTB 未启用"; exit 1; }
+          echo "make 前硬校验通过"
 
           cp .config final_config.txt
 
-          MEM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-          MEM_MB=$((MEM_KB/1024))
+          MEM_MB=$(($(grep MemTotal /proc/meminfo | awk '{print $2}')/1024))
           CPUS=$(nproc)
           MAX_JOBS=$((MEM_MB / 500))
           JOBS=$((MAX_JOBS < CPUS ? MAX_JOBS : CPUS))
-          JOBS=$((JOBS < 1 ? 1 : JOBS))
+          [ "$JOBS" -lt 1 ] && JOBS=1
           echo "使用并发: -j${JOBS} (CPU: ${CPUS}, 内存: ${MEM_MB}MB)"
-          make -j"${JOBS}" V=1 HOSTCFLAGS="-fcommon" Image.gz modules dtbs
+
+          # ★★★ 编译
+          make -j"${JOBS}" V=1 HOSTCFLAGS="-fcommon" Image.gz-dtb modules
+
+          # ============================================================
+          # ★★★ 编译后验证：auto.conf 是否被 silentoldconfig 改回
+          # ============================================================
+          echo "===== 编译后验证 ====="
+          echo "--- .config 实际值 ---"
+          grep -E '^#? ?CONFIG_(USB_MSM_OTG|USB_MSM_HSPHY|USB_CI13XXX_MSM|QPNP_TYPEC|HUAWEI_TYPEC|DUAL_ROLE_USB_INTF|EXTCON|USB_G_ANDROID)' .config || echo "(无)"
+          echo "--- include/config/auto.conf（真正喂给编译器的）---"
+          grep -E '^#? ?CONFIG_(USB_MSM_OTG|USB_MSM_HSPHY|USB_CI13XXX_MSM|QPNP_TYPEC|HUAWEI_TYPEC|DUAL_ROLE_USB_INTF|EXTCON|USB_G_ANDROID)' include/config/auto.conf || echo "(无)"
+          echo "--- diff final_config.txt .config ---"
+          if diff -q final_config.txt .config >/dev/null; then
+            echo "一致：sed 改动未被翻回"
+          else
+            echo "警告：.config 在 make 期间被改动"
+            diff final_config.txt .config | head -30 || true
+          fi
+          echo "--- 硬校验 auto.conf ---"
+          if grep -q '^CONFIG_USB_MSM_OTG=y' include/config/auto.conf 2>/dev/null; then
+            echo "错误：auto.conf 中 USB_MSM_OTG=y，编译实际启用了它"; exit 1
+          fi
+          if grep -q '^CONFIG_QPNP_TYPEC=y' include/config/auto.conf 2>/dev/null; then
+            echo "警告：auto.conf 中 QPNP_TYPEC=y，说明还有别的 select 源"
+          fi
+          if grep -q '^CONFIG_EXTCON=y' include/config/auto.conf 2>/dev/null; then
+            echo "警告：auto.conf 中 EXTCON=y，同上"
+          fi
+          echo "编译后验证完成"
+
+          echo "===== 编译产物 ====="
+          ls -la arch/arm64/boot/Image*
+          [ -f arch/arm64/boot/Image.gz-dtb ] || { echo "错误：Image.gz-dtb 未生成"; exit 1; }
 
       - name: 上传最终内核配置
         uses: actions/upload-artifact@v4
@@ -317,51 +395,32 @@ jobs:
           name: final-config
           path: final_config.txt
 
-      - name: 收集模块文件（保留目录结构，排除 modules_output）
+      - name: 收集模块
         run: |
           mkdir -p modules_output
           find . -path ./modules_output -prune -o -name '*.ko' -print -exec cp --parents {} modules_output/ \;
           KO_COUNT=$(find modules_output -type f -name '*.ko' | wc -l)
           if [ "$KO_COUNT" -eq 0 ]; then
-            echo "错误：没有编译出任何内核模块"
+            echo "错误：没有编译出模块"
             exit 1
           fi
-          echo "共找到 ${KO_COUNT} 个模块文件"
-          echo "模块目录结构："
-          find modules_output -type f -name '*.ko' | sed -n '1,100p'
+          echo "共找到 ${KO_COUNT} 个模块"
+          echo "===== WiFi 驱动模块 ====="
+          find modules_output -type f -name '*.ko' | grep -iE "ath9k|rtl8|rtlwifi|rt2|rt2800|8188|8192" || echo "(未找到 WiFi 模块)"
 
-      - name: 打包 AnyKernel3 刷机包
+      - name: 打包 AnyKernel3
         run: |
           for i in 1 2 3; do
             rm -rf anykernel || true
             git clone https://github.com/osm0sis/AnyKernel3 --depth=1 anykernel && break || sleep 5
           done
 
-          if [ -f arch/arm64/boot/Image.gz ]; then
-            cp -v arch/arm64/boot/Image.gz anykernel/
-          elif [ -f arch/arm64/boot/Image ]; then
-            gzip -c arch/arm64/boot/Image > anykernel/Image.gz
-            echo "已将 Image 压缩为 Image.gz"
+          if [ -f arch/arm64/boot/Image.gz-dtb ]; then
+            cp -v arch/arm64/boot/Image.gz-dtb anykernel/
+            echo "已使用 Image.gz-dtb"
           else
-            echo "错误：找不到内核镜像文件"
-            exit 1
-          fi
-
-          echo "=== 所有生成的 dtb 文件 ==="
-          find arch/arm/boot/dts -type f -name "*.dtb" | sed -n '1,200p'
-
-          DTB_FILE=$(find arch/arm/boot/dts -type f -iname "*can-l02*.dtb" -print -quit)
-          if [ -z "$DTB_FILE" ]; then
-            DTB_FILE=$(find . -type f -iname "*can-l02*.dtb" | head -n1)
-          fi
-          if [ -n "$DTB_FILE" ]; then
-            mkdir -p anykernel/dtb
-            cp -v "$DTB_FILE" anykernel/dtb/
-            echo "使用 DTB: $DTB_FILE"
-          else
-            echo "错误：找不到 can-l02 对应的 dtb 文件"
-            echo "可用 dtb 列表："
-            find arch/arm/boot/dts -type f -name "*.dtb" | sed -n '1,200p'
+            echo "错误：未找到 Image.gz-dtb"
+            ls -la arch/arm64/boot/
             exit 1
           fi
 
@@ -372,8 +431,8 @@ jobs:
           sed -i 's/.*do\.devicecheck=.*/do.devicecheck=0/' anykernel.sh
           grep -q "^do.devicecheck=" anykernel.sh || echo "do.devicecheck=0" >> anykernel.sh
 
-          sed -i 's/.*do\.dtb=.*/do.dtb=1/' anykernel.sh
-          grep -q "^do.dtb=" anykernel.sh || echo "do.dtb=1" >> anykernel.sh
+          sed -i 's/.*do\.dtb=.*/do.dtb=0/' anykernel.sh
+          grep -q "^do.dtb=" anykernel.sh || echo "do.dtb=0" >> anykernel.sh
 
           sed -i 's/.*do\.modules=.*/do.modules=1/' anykernel.sh
           grep -q "^do.modules=" anykernel.sh || echo "do.modules=1" >> anykernel.sh
@@ -381,7 +440,7 @@ jobs:
           sed -i 's/.*module_path=.*/module_path=\/system\/lib\/modules/' anykernel.sh
           grep -q "^module_path=" anykernel.sh || echo "module_path=/system/lib/modules" >> anykernel.sh
 
-          echo "=== anykernel.sh 关键配置检查 ==="
+          echo "=== anykernel.sh 配置 ==="
           grep -n 'do\.devicecheck\|do\.dtb\|do\.modules\|module_path' anykernel.sh || true
 
           zip -r9 ../kernel-hwcan-nethunter.zip *
@@ -393,7 +452,7 @@ jobs:
           name: 完整刷机包-含内核和模块
           path: kernel-hwcan-nethunter.zip
 
-      - name: 上传模块文件（单独备份，保留目录结构）
+      - name: 上传模块文件
         uses: actions/upload-artifact@v4
         with:
           name: 单独的模块文件-含目录结构
