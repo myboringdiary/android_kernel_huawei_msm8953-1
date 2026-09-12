@@ -179,6 +179,17 @@ jobs:
           make olddefconfig
           grep -E '^CONFIG_CFG80211=|^CONFIG_CFG80211_INTERNAL_REGDB=' .config
 
+          # ===== 强制启用 USB WiFi 驱动 =====
+          for sym in MAC80211 MAC80211_LEDS MAC80211_MESH \
+                     ATH9K_HTC ATH9K_HTC_DEBUGFS \
+                     RTL8187 RTL8192CU RTLWIFI RTLWIFI_USB \
+                     RT2X00 RT2800USB RT2800USB_RT33XX RT2800USB_RT35XX \
+                     RT2800USB_RT3573 RT2800USB_RT53XX RT2800USB_RT55XX RT2800USB_UNKNOWN \
+                     R8188EU; do
+            scripts/config --file .config --enable "$sym" 2>/dev/null || true
+          done
+          make olddefconfig
+
           # ---------- 强制禁用所有冲突配置（循环处理，确保彻底禁用） ----------
           echo "===== 开始禁用冲突配置（MSM_DBA/HUAWEI_FACTORY_INFO/SERIAL_NUM/PN547）====="
           PATTERN='MSM_DBA|HUAWEI_FACTORY_INFO|SERIAL_NUM|PN547'
@@ -228,22 +239,25 @@ jobs:
           echo "CONFIG_USB_CONFIGFS_F_MTP=y" >> .config
           echo "CONFIG_USB_CONFIGFS_F_PTP=y" >> .config
 
-          # ===== 启用 EXTCON，修复 DWC3 Dual Role 模式检测（保留 Host 模式） =====
-          echo "CONFIG_EXTCON=y" >> .config
-          echo "CONFIG_EXTCON_GPIO=y" >> .config
-
           make olddefconfig
 
-          # 再次强制启用 EXTCON（防止 olddefconfig 因依赖问题关闭）
-          scripts/config --file .config --enable EXTCON 2>/dev/null || true
-          scripts/config --file .config --enable EXTCON_GPIO 2>/dev/null || true
+          # ===== 禁用干扰 DWC3 的其他 USB 栈（EXTCON 等）=====
+          for sym in USB_MSM_OTG QPNP_TYPEC HUAWEI_TYPEC DUAL_ROLE_USB_INTF EXTCON EXTCON_GPIO; do
+            scripts/config --file .config --disable "$sym" 2>/dev/null || true
+            sed -i "s/^CONFIG_${sym}=y/# CONFIG_${sym} is not set/" .config
+            sed -i "s/^CONFIG_${sym}=m/# CONFIG_${sym} is not set/" .config
+          done
+          make olddefconfig
+          for sym in USB_MSM_OTG QPNP_TYPEC HUAWEI_TYPEC DUAL_ROLE_USB_INTF EXTCON EXTCON_GPIO; do
+            scripts/config --file .config --disable "$sym" 2>/dev/null || true
+          done
           make olddefconfig
 
           # ===== 最终 USB 配置检查（必须全部为 y，否则直接失败） =====
           echo "===== 最终 USB 配置检查 ====="
           grep -E '^CONFIG_CONFIGFS_FS=|^CONFIG_USB_GADGET=|^CONFIG_USB_CONFIGFS=|^CONFIG_USB_CONFIGFS_F_FS=|^CONFIG_USB_CONFIGFS_F_MTP=|^CONFIG_USB_CONFIGFS_F_PTP=|^CONFIG_USB_G_ANDROID=' .config
-          echo "===== DWC3 模式与 EXTCON 检查 ====="
-          grep -E '^CONFIG_USB_DWC3=|^CONFIG_USB_DWC3_HOST=|^CONFIG_USB_DWC3_GADGET=|^CONFIG_USB_DWC3_DUAL_ROLE=|^CONFIG_EXTCON=|^CONFIG_EXTCON_GPIO=' .config
+          echo "===== DWC3 模式与干扰栈检查 ====="
+          grep -E '^CONFIG_USB_DWC3=|^CONFIG_USB_DWC3_HOST=|^CONFIG_USB_DWC3_GADGET=|^CONFIG_USB_DWC3_DUAL_ROLE=|^CONFIG_EXTCON=|^CONFIG_EXTCON_GPIO=|^CONFIG_QPNP_TYPEC=|^CONFIG_HUAWEI_TYPEC=|^CONFIG_DUAL_ROLE_USB_INTF=|^CONFIG_USB_MSM_OTG=' .config
 
           if ! grep -q '^CONFIG_CONFIGFS_FS=y' .config; then
             echo "错误：CONFIG_CONFIGFS_FS 未启用！"
@@ -269,24 +283,23 @@ jobs:
             echo "错误：CONFIG_USB_CONFIGFS_F_PTP 未启用！"
             exit 1
           fi
-          if ! grep -q '^CONFIG_EXTCON=y' .config; then
-            echo "错误：CONFIG_EXTCON 未启用！Dual Role 模式将无法检测 USB 状态"
-            exit 1
-          fi
-          if ! grep -q '^CONFIG_EXTCON_GPIO=y' .config; then
-            echo "错误：CONFIG_EXTCON_GPIO 未启用！无法读取 usbid-gpio"
-            exit 1
-          fi
           if ! grep -q '^CONFIG_USB_DWC3_DUAL_ROLE=y' .config; then
             echo "错误：CONFIG_USB_DWC3_DUAL_ROLE 未启用！Host 模式将丢失"
             exit 1
           fi
-          if grep -q '^CONFIG_USB_DWC3_GADGET=y' .config; then
-            echo "错误：CONFIG_USB_DWC3_GADGET 被启用！这会破坏 Dual Role 模式"
+          if grep -q '^CONFIG_USB_G_ANDROID=y' .config; then
+            echo "错误：CONFIG_USB_G_ANDROID 仍被启用，会与 configfs 冲突"
+            exit 1
+          fi
+          if grep -q '^CONFIG_QPNP_TYPEC=y' .config; then
+            echo "错误：CONFIG_QPNP_TYPEC 仍被启用，会抢占 pmic_id_irq"
+            exit 1
+          fi
+          if grep -q '^CONFIG_EXTCON=y' .config; then
+            echo "错误：CONFIG_EXTCON 仍被启用，与 pmic_id_irq 方案冲突"
             exit 1
           fi
 
-          # 上传最终 .config 作为 artifact（便于排查）
           cp .config final_config.txt
 
           MEM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
