@@ -123,7 +123,7 @@ jobs:
 
       - name: 注入 DWC3 pmic_id_irq dts 补丁
         run: |
-          TARGETS=$(find arch -name 'huawei-usb.dtsi' -path '*huawei_msm8953_can_l0[12]_v*' 2>/dev/null)
+          TARGETS=$(find arch -name 'huawei-usb.dtsi' -path '*huawei_msm8953_*' 2>/dev/null)
           if [ -z "$TARGETS" ]; then
             echo "错误：找不到 huawei-usb.dtsi"
             find arch -name 'huawei-usb.dtsi' 2>/dev/null | head -20
