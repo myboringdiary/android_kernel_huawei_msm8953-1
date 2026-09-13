@@ -121,47 +121,6 @@ jobs:
             sed -i '/mdss_dba_utils\.o/ s/^obj-y/obj-$(CONFIG_MSM_DBA)/' "$MAKEFILE"
           fi
 
-      - name: 注入 DWC3 pmic_id_irq dts 补丁
-        run: |
-          TARGETS=$(find arch -name 'huawei-usb.dtsi' -path '*huawei_msm8953_*' 2>/dev/null)
-          if [ -z "$TARGETS" ]; then
-            echo "错误：找不到 huawei-usb.dtsi"
-            find arch -name 'huawei-usb.dtsi' 2>/dev/null | head -20
-            exit 1
-          fi
-          echo "命中文件:"
-          echo "$TARGETS"
-          for f in $TARGETS; do
-            [ -f "$f" ] || continue
-            # 去掉旧的 NetHunter 块（若有）
-            awk '/NetHunter: 接入 PMIC ID/{exit} {print}' "$f" > "$f.tmp"
-            mv "$f.tmp" "$f"
-            # 末行若无换行，补一个
-            [ -n "$(tail -c1 "$f")" ] && echo >> "$f" || true
-            # 追加新 patch
-            printf '%s\n' \
-              '/* ===== NetHunter: 接入 PMIC ID 中断，恢复 OTG 检测 ===== */' \
-              '&usb3 {' \
-              '    /delete-property/ interrupts;' \
-              '    interrupts-extended = <&intc 0 136 0>,' \
-              '                          <&intc 0 220 0>,' \
-              '                          <&intc 0 134 0>,' \
-              '                          <&spmi_bus 0x2 0x11 0x3>;' \
-              '    interrupt-names = "hs_phy_irq", "ss_phy_irq", "pwr_event_irq",' \
-              '                      "pmic_id_irq";' \
-              '    dwc3@7000000 {' \
-              '        dr_mode = "otg";' \
-              '    };' \
-              '};' >> "$f"
-            echo "已修正: $f"
-          done
-          echo "===== dts 校验 ====="
-          for f in $TARGETS; do
-            grep -q 'interrupts-extended' "$f" || { echo "错误: $f 缺少 interrupts-extended"; exit 1; }
-            grep -q 'dr_mode = "otg"' "$f" || { echo "错误: $f 缺少 dr_mode"; exit 1; }
-          done
-          echo "dts 校验通过"
-
       - name: 设置 swap
         run: |
           MEM_MB=$(($(grep MemTotal /proc/meminfo | awk '{print $2}')/1024))

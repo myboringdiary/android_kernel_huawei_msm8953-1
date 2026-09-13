@@ -4640,13 +4640,7 @@ CONFIG_MSM_PRESERVE_MEM=y
 CONFIG_MODULES=y
 CONFIG_NETFILTER_ADVANCED=y
 CONFIG_USB_GADGET=y
-CONFIG_USB_F_HID=m
 CONFIG_USB_CONFIGFS=y
-CONFIG_USB_CONFIGFS_F_HID=m
-CONFIG_USB_CONFIGFS_F_ACM=m
-CONFIG_USB_CONFIGFS_F_RNDIS=m
-CONFIG_USB_CONFIGFS_F_ECM=m
-CONFIG_USB_CONFIGFS_F_MASS_STORAGE=m
 CONFIG_HIDRAW=m
 CONFIG_UHID=m
 CONFIG_USB_HID=m
@@ -4722,3 +4716,6 @@ CONFIG_R8188EU=m
 # CONFIG_USB_CI13XXX_MSM is not set
 
 CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE_NAMES="qcom/huawei-mla-al00-va qcom/huawei-mla-al00-vb qcom/huawei-mla-al00-vc qcom/huawei-mla-al00-vd qcom/huawei-mla-al00-ve qcom/huawei-mla-l01-va qcom/huawei-mla-l01-vb qcom/huawei-mla-l02-va qcom/huawei-mla-l03-va qcom/huawei-mla-tl00-va qcom/huawei-can-al00-va qcom/huawei-can-al00-vb qcom/huawei-can-al00-vc qcom/huawei-can-al00-vd qcom/huawei-can-cl00-va qcom/huawei-can-tl00-va qcom/huawei-can-l01-va qcom/huawei-can-l01-vb qcom/huawei-can-l01-vc qcom/huawei-can-l01-vd qcom/huawei-can-l02-va qcom/huawei-can-l02-vb qcom/huawei-can-l02-vc qcom/huawei-can-l03-va qcom/huawei-can-l03-vb qcom/huawei-can-l03-vc"
+
+# ===== NetHunter: 用 3.18 风格的正确符号 =====
+CONFIG_USB_F_RNDIS=y
