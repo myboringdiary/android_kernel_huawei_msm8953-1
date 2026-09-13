@@ -177,7 +177,7 @@ jobs:
           make olddefconfig
 
           # 关键：先禁 USB_CI13XXX_MSM（断开它对 USB_MSM_OTG 的 select）
-          for sym in USB_CI13XXX_MSM QPNP_TYPEC HUAWEI_TYPEC DUAL_ROLE_USB_INTF EXTCON EXTCON_GPIO; do
+          for sym in USB_CI13XXX_MSM HUAWEI_TYPEC DUAL_ROLE_USB_INTF EXTCON EXTCON_GPIO; do
             scripts/config --file .config --disable "$sym" 2>/dev/null || true
             sed -i "s/^CONFIG_${sym}=y/# CONFIG_${sym} is not set/" .config
             sed -i "s/^CONFIG_${sym}=m/# CONFIG_${sym} is not set/" .config
@@ -187,7 +187,7 @@ jobs:
           # ============================================================
           # 六道防线：彻底断掉 select 链与 silentoldconfig 翻回
           # ============================================================
-          KILL_SYMS="USB_MSM_OTG USB_MSM_HSPHY USB_CI13XXX_MSM QPNP_TYPEC HUAWEI_TYPEC DUAL_ROLE_USB_INTF EXTCON EXTCON_GPIO USB_G_ANDROID"
+          KILL_SYMS="USB_MSM_OTG USB_MSM_HSPHY USB_CI13XXX_MSM HUAWEI_TYPEC DUAL_ROLE_USB_INTF EXTCON EXTCON_GPIO USB_G_ANDROID"
 
           # ---- 第 1 道：olddefconfig 之后再硬改 ----
           echo "===== 第 1 道：sed .config 断开表层 ====="
