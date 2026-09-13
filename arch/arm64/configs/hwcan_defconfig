@@ -4707,8 +4707,6 @@ CONFIG_RT2800USB_UNKNOWN=y
 CONFIG_R8188EU=m
 
 # ===== 禁用干扰 DWC3 的其他 USB 栈 =====
-CONFIG_QPNP_TYPEC=y
-# CONFIG_HUAWEI_TYPEC is not set
 # CONFIG_DUAL_ROLE_USB_INTF is not set
 # CONFIG_USB_MSM_OTG is not set
 # CONFIG_EXTCON is not set
@@ -4719,3 +4717,7 @@ CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE_NAMES="qcom/huawei-mla-al00-va qcom/huawei
 
 # ===== NetHunter: 用 3.18 风格的正确符号 =====
 CONFIG_USB_F_RNDIS=y
+
+# NetHunter: 启用 typec 层打破 smbcharger defer 循环
+CONFIG_QPNP_TYPEC=y
+CONFIG_HUAWEI_TYPEC=y
