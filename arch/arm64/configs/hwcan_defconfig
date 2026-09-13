@@ -469,7 +469,6 @@ CONFIG_CMDLINE=""
 CONFIG_EFI_STUB=y
 CONFIG_EFI=y
 CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE=y
-CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE_NAMES=""
 CONFIG_DMI=y
 
 #
@@ -4721,3 +4720,5 @@ CONFIG_R8188EU=m
 # CONFIG_EXTCON is not set
 # CONFIG_EXTCON_GPIO is not set
 # CONFIG_USB_CI13XXX_MSM is not set
+
+CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE_NAMES="qcom/huawei-mla-al00-va qcom/huawei-mla-al00-vb qcom/huawei-mla-al00-vc qcom/huawei-mla-al00-vd qcom/huawei-mla-al00-ve qcom/huawei-mla-l01-va qcom/huawei-mla-l01-vb qcom/huawei-mla-l02-va qcom/huawei-mla-l03-va qcom/huawei-mla-tl00-va qcom/huawei-can-al00-va qcom/huawei-can-al00-vb qcom/huawei-can-al00-vc qcom/huawei-can-al00-vd qcom/huawei-can-cl00-va qcom/huawei-can-tl00-va qcom/huawei-can-l01-va qcom/huawei-can-l01-vb qcom/huawei-can-l01-vc qcom/huawei-can-l01-vd qcom/huawei-can-l02-va qcom/huawei-can-l02-vb qcom/huawei-can-l02-vc qcom/huawei-can-l03-va qcom/huawei-can-l03-vb qcom/huawei-can-l03-vc"

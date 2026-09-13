@@ -33,3 +33,16 @@
 		};
 	};
 };
+/* ===== NetHunter: 接入 PMIC ID 中断，恢复 OTG 检测 ===== */
+&usb3 {
+    /delete-property/ interrupts;
+    interrupts-extended = <&intc 0 136 0>,
+                          <&intc 0 220 0>,
+                          <&intc 0 134 0>,
+                          <&spmi_bus 0x2 0x11 0x3>;
+    interrupt-names = "hs_phy_irq", "ss_phy_irq", "pwr_event_irq",
+                      "pmic_id_irq";
+    dwc3@7000000 {
+        dr_mode = "otg";
+    };
+};
