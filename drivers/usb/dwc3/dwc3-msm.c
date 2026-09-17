@@ -3052,7 +3052,9 @@ static int dwc3_msm_probe(struct platform_device *pdev)
 		}
 	}
 
+	printk(KERN_ERR "DWC3_MSM_POPULATE_BEFORE\n");
 	ret = of_platform_populate(node, NULL, NULL, &pdev->dev);
+	printk(KERN_ERR "DWC3_MSM_POPULATE_AFTER ret=%d\n", ret);
 	if (ret) {
 		dev_err(&pdev->dev,
 			"failed to add create dwc3 core\n");
