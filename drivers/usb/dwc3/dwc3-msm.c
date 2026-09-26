@@ -3161,6 +3161,7 @@ static int dwc3_msm_remove(struct platform_device *pdev)
 {
 	struct dwc3_msm	*mdwc = platform_get_drvdata(pdev);
 	struct dwc3 *dwc = platform_get_drvdata(mdwc->dwc3);
+	printk(KERN_ERR "DWC3_MSM_REMOVE called\n");
 	int ret_pm;
 
 	if (cpu_to_affin)
