@@ -789,13 +789,9 @@ static int dwc3_probe(struct platform_device *pdev)
 	void __iomem		*regs;
 	void			*mem;
 
-	printk(KERN_ERR "DWC3_CORE_PROBE_A kzalloc_begin size=%zu\n", sizeof(*dwc) + DWC3_ALIGN_MASK);
 	mem = devm_kzalloc(dev, sizeof(*dwc) + DWC3_ALIGN_MASK, GFP_KERNEL);
-	if (!mem) {
-		printk(KERN_ERR "DWC3_CORE_PROBE_B kzalloc_fail\n");
+	if (!mem)
 		return -ENOMEM;
-	}
-	printk(KERN_ERR "DWC3_CORE_PROBE_C kzalloc_ok\n");
 
 	dwc = PTR_ALIGN(mem, DWC3_ALIGN_MASK + 1);
 	dwc->mem = mem;
@@ -842,13 +838,9 @@ static int dwc3_probe(struct platform_device *pdev)
 	 * Request memory region but exclude xHCI regs,
 	 * since it will be requested by the xhci-plat driver.
 	 */
-	printk(KERN_ERR "DWC3_CORE_PROBE_D ioremap_begin start=0x%llx end=0x%llx\n", (unsigned long long)res->start, (unsigned long long)res->end);
 	regs = devm_ioremap_resource(dev, res);
-	if (IS_ERR(regs)) {
-		printk(KERN_ERR "DWC3_CORE_PROBE_E ioremap_fail ret=%ld\n", PTR_ERR(regs));
+	if (IS_ERR(regs))
 		return PTR_ERR(regs);
-	}
-	printk(KERN_ERR "DWC3_CORE_PROBE_F ioremap_ok\n");
 
 	dwc->regs	= regs;
 	dwc->regs_size	= resource_size(res);
@@ -931,13 +923,9 @@ static int dwc3_probe(struct platform_device *pdev)
 	dwc->hird_threshold = hird_threshold
 		| (dwc->is_utmi_l1_suspend << 4);
 
-	printk(KERN_ERR "DWC3_CORE_PROBE_G get_phy_begin\n");
 	ret = dwc3_core_get_phy(dwc);
-	if (ret) {
-		printk(KERN_ERR "DWC3_CORE_PROBE_H get_phy_fail ret=%d\n", ret);
+	if (ret)
 		return ret;
-	}
-	printk(KERN_ERR "DWC3_CORE_PROBE_I get_phy_ok usb2=%p usb3=%p\n", dwc->usb2_phy, dwc->usb3_phy);
 
 	spin_lock_init(&dwc->lock);
 	init_waitqueue_head(&dwc->wait_linkstate);
@@ -961,19 +949,13 @@ static int dwc3_probe(struct platform_device *pdev)
 		dwc->is_drd = true;
 	}
 
-	printk(KERN_ERR "DWC3_CORE_PROBE_J phy_power_on_usb2_begin phy=%p\n", dwc->usb2_generic_phy);
 	ret = phy_power_on(dwc->usb2_generic_phy);
-	if (ret < 0) {
-		printk(KERN_ERR "DWC3_CORE_PROBE_K phy_power_on_usb2_fail ret=%d\n", ret);
+	if (ret < 0)
 		goto err;
-	}
 
-	printk(KERN_ERR "DWC3_CORE_PROBE_L phy_power_on_usb3_begin phy=%p\n", dwc->usb3_generic_phy);
 	ret = phy_power_on(dwc->usb3_generic_phy);
-	if (ret < 0) {
-		printk(KERN_ERR "DWC3_CORE_PROBE_M phy_power_on_usb3_fail ret=%d\n", ret);
+	if (ret < 0)
 		goto err_usb2phy_power;
-	}
 
 	ret = dwc3_debugfs_init(dwc);
 	if (ret) {
@@ -987,14 +969,11 @@ static int dwc3_probe(struct platform_device *pdev)
 
 	if (dwc->dr_mode == USB_DR_MODE_OTG ||
 		dwc->dr_mode == USB_DR_MODE_PERIPHERAL) {
-		printk(KERN_ERR "DWC3_CORE_PROBE_N gadget_init_begin dr_mode=%d\n", dwc->dr_mode);
 		ret = dwc3_gadget_init(dwc);
 		if (ret) {
-			printk(KERN_ERR "DWC3_CORE_PROBE_O gadget_init_fail ret=%d\n", ret);
 			dev_err(dev, "failed to initialize gadget\n");
 			goto err_usb3phy_power;
 		}
-		printk(KERN_ERR "DWC3_CORE_PROBE_P gadget_init_ok\n");
 	}
 
 	if (dwc->dr_mode == USB_DR_MODE_OTG ||
@@ -1006,7 +985,6 @@ static int dwc3_probe(struct platform_device *pdev)
 		}
 	}
 	dwc3_notify_event(dwc, DWC3_CONTROLLER_POST_INITIALIZATION_EVENT, 0);
-	printk(KERN_ERR "DWC3_CORE_PROBE_Z probe_return_zero\n");
 
 	return 0;
 
