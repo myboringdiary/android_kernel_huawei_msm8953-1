@@ -360,8 +360,6 @@ void usb_del_gadget_udc(struct usb_gadget *gadget)
 {
 	struct usb_udc		*udc = NULL;
 
-	printk(KERN_ERR "UDC_DEL called name=%s\n", dev_name(&gadget->dev));
-
 	mutex_lock(&udc_lock);
 	list_for_each_entry(udc, &udc_list, list)
 		if (udc->gadget == gadget)
@@ -437,7 +435,6 @@ int udc_attach_driver(const char *name, struct usb_gadget_driver *driver)
 	int ret = -ENODEV;
 
 	mutex_lock(&udc_lock);
-	printk(KERN_ERR "UDC_ATTACH req=%s list_empty=%d\n", name, list_empty(&udc_list));
 	list_for_each_entry(udc, &udc_list, list) {
 		ret = strcmp(name, dev_name(&udc->dev));
 		if (!ret)
