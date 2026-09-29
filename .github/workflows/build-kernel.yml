@@ -167,13 +167,7 @@ jobs:
           done
 
           # configfs 依赖
-          scripts/config --file .config --disable USB_G_ANDROID 2>/dev/null || true
-          echo "CONFIG_CONFIGFS_FS=y" >> .config
           echo "CONFIG_USB_GADGET=y" >> .config
-          echo "CONFIG_USB_CONFIGFS=y" >> .config
-          echo "CONFIG_USB_CONFIGFS_F_FS=y" >> .config
-          echo "CONFIG_USB_CONFIGFS_F_MTP=y" >> .config
-          echo "CONFIG_USB_CONFIGFS_F_PTP=y" >> .config
           make olddefconfig
 
           # 关键：先禁 USB_CI13XXX_MSM（断开它对 USB_MSM_OTG 的 select）
@@ -187,7 +181,7 @@ jobs:
           # ============================================================
           # 六道防线：彻底断掉 select 链与 silentoldconfig 翻回
           # ============================================================
-          KILL_SYMS="USB_MSM_OTG USB_MSM_HSPHY USB_CI13XXX_MSM EXTCON EXTCON_GPIO USB_G_ANDROID"
+          KILL_SYMS="USB_MSM_OTG USB_MSM_HSPHY USB_CI13XXX_MSM EXTCON EXTCON_GPIO"
 
           # ---- 第 1 道：olddefconfig 之后再硬改 ----
           echo "===== 第 1 道：sed .config 断开表层 ====="
@@ -269,8 +263,6 @@ jobs:
           grep -q '^# CONFIG_USB_MSM_OTG is not set' .config || { echo "错误：USB_MSM_OTG 未被禁用"; exit 1; }
           grep -q '^# CONFIG_USB_CI13XXX_MSM is not set' .config || { echo "错误：USB_CI13XXX_MSM 未被禁用"; exit 1; }
           grep -q '^CONFIG_USB_DWC3_DUAL_ROLE=y' .config || { echo "错误：DWC3 Dual Role 丢失"; exit 1; }
-          grep -q '^CONFIG_USB_CONFIGFS=y' .config || { echo "错误：CONFIGFS 丢失"; exit 1; }
-          grep -q '^CONFIG_USB_CONFIGFS_F_MTP=y' .config || { echo "错误：F_MTP 丢失"; exit 1; }
           grep -q '^CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE=y' .config || { echo "错误：APPENDED_DTB 未启用"; exit 1; }
           echo "make 前硬校验通过"
 
