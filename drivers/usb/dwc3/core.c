@@ -605,7 +605,6 @@ static int dwc3_core_get_phy(struct dwc3 *dwc)
 		if (ret == -ENXIO || ret == -ENODEV) {
 			dwc->usb2_phy = NULL;
 		} else if (ret == -EPROBE_DEFER) {
-   printk(KERN_ERR "DWC3_CORE_GET_PHY_DEFER usb2_phy ret=%d\n", ret);
 			return ret;
 		} else {
 			dev_err(dev, "no usb2 phy configured\n");
@@ -618,7 +617,6 @@ static int dwc3_core_get_phy(struct dwc3 *dwc)
 		if (ret == -ENXIO || ret == -ENODEV) {
 			dwc->usb3_phy = NULL;
 		} else if (ret == -EPROBE_DEFER) {
-   printk(KERN_ERR "DWC3_CORE_GET_PHY_DEFER usb3_phy ret=%d\n", ret);
 			return ret;
 		} else {
 			dev_err(dev, "no usb3 phy configured\n");
@@ -632,7 +630,6 @@ static int dwc3_core_get_phy(struct dwc3 *dwc)
 		if (ret == -ENOSYS || ret == -ENODEV) {
 			dwc->usb2_generic_phy = NULL;
 		} else if (ret == -EPROBE_DEFER) {
-   printk(KERN_ERR "DWC3_CORE_GET_PHY_DEFER usb2_generic_phy ret=%d\n", ret);
 			return ret;
 		} else {
 			dev_err(dev, "no usb2 phy configured\n");
@@ -646,7 +643,6 @@ static int dwc3_core_get_phy(struct dwc3 *dwc)
 		if (ret == -ENOSYS || ret == -ENODEV) {
 			dwc->usb3_generic_phy = NULL;
 		} else if (ret == -EPROBE_DEFER) {
-   printk(KERN_ERR "DWC3_CORE_GET_PHY_DEFER usb3_generic_phy ret=%d\n", ret);
 			return ret;
 		} else {
 			dev_err(dev, "no usb3 phy configured\n");
@@ -773,7 +769,6 @@ err_alloc:
 
 static int dwc3_probe(struct platform_device *pdev)
 {
-	printk(KERN_ERR "DWC3_CORE_PROBE_ENTER\n");
 	struct device		*dev = &pdev->dev;
 	struct dwc3_platform_data *pdata = dev_get_platdata(dev);
 	struct device_node	*node = dev->of_node;
