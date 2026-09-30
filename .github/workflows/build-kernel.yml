@@ -1,6 +1,9 @@
 name: 编译内核+打包模块
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - lineage-15.1
 jobs:
   build:
     runs-on: ubuntu-latest
