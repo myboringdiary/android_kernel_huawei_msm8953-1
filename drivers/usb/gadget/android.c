@@ -114,7 +114,7 @@ usb_param usb_parameter = {
 };
 #define STRING_TO_HEX_INT        16
 
-int usb_debug = USB_LOGS_INFO;
+int usb_debug = 0;
 module_param(usb_debug, int, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(usb_debug, "USB DEBUG LEVEL");
 
