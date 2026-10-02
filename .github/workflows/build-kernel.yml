@@ -401,6 +401,10 @@ jobs:
           sed -i 's/^CONFIG_PLATFORM_ANDROID_ARM64 = n/CONFIG_PLATFORM_ANDROID_ARM64 = y/' Makefile
           grep -nE "^CONFIG_PLATFORM_(I386_PC|ANDROID_ARM64)" Makefile
 
+          # 3.18 内核适配：覆盖补丁后的 2 个文件
+          cp $GITHUB_WORKSPACE/patches/rtl8812au-v5.6.4.2/ioctl_cfg80211.c os_dep/linux/
+          cp $GITHUB_WORKSPACE/patches/rtl8812au-v5.6.4.2/ioctl_cfg80211.h os_dep/linux/
+
           make -j4 ARCH=arm64 CROSS_COMPILE=$CROSS_COMPILE KSRC=$GITHUB_WORKSPACE 2>&1 | tee /tmp/rtl_build.log || true
 
           {
